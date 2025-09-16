@@ -1,6 +1,8 @@
-@NeoIPC.Reporting_HostAddress = http://localhost:5270
+@NeoIPC_Reporting_HostAddress = http://localhost:32769
 
-GET {{NeoIPC.Reporting_HostAddress}}/weatherforecast/
-Accept: application/json
+GET {{NeoIPC_Reporting_HostAddress}}/reference-report/
+Accept: text/html
+Accept-Language: de
+Cookie: JSESSIONID=3353464BC07A5B9F0152E1F66445A37C
 
 ###
