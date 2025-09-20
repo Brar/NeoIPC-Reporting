@@ -7,13 +7,12 @@ namespace NeoIPC.Reporting;
 
 sealed class ReferenceReport : QuartoReport
 {
-    protected override string JSessionId { get; }
+    protected override string SessionId { get; }
     protected override string[] ReportParameters { get; }
     protected override string? ResponseContentType { get; }
     protected override string ReportFileName { get; }
 
-    public ReferenceReport(
-        DateOnly? reportingPeriodFrom,
+    public ReferenceReport(DateOnly? reportingPeriodFrom,
         DateOnly? reportingPeriodTo,
         ushort? birthWeightFrom,
         ushort? birthWeightTo,
@@ -23,7 +22,9 @@ sealed class ReferenceReport : QuartoReport
         string[] hospitalFilter,
         bool? testUnitFilter,
         bool? defaultPatientFilter,
-        HttpRequest httpRequest) : base("Reference Report")
+        HttpRequest httpRequest,
+        IWebHostEnvironment environment,
+        ILogger<ReferenceReport> logger) : base("Reference Report", environment, logger)
     {
         List<string> reportParameters = [];
         if (reportingPeriodFrom.HasValue)
@@ -58,7 +59,7 @@ sealed class ReferenceReport : QuartoReport
         ReportParameters = reportParameters.ToArray();
 
         var headers = httpRequest.GetTypedHeaders();
-        JSessionId = headers.Cookie.FirstOrDefault(cookieHeaderValue => cookieHeaderValue is
+        SessionId = headers.Cookie.FirstOrDefault(cookieHeaderValue => cookieHeaderValue is
         { Name: { HasValue: true, Value: "JSESSIONID" }, Value.HasValue: true })
             ?.Value.ToString() ?? throw new ArgumentException("JSESSIONID is missing.");
 
@@ -102,6 +103,7 @@ sealed class ReferenceReport : QuartoReport
         ReportFileName = acceptLanguageSort.OrderByDescending(s => s.Quality).ThenBy(s => s.Location).FirstOrDefault().FileName ?? "Reference Report.qmd";
 
     }
+
     public static async Task<IResult> Get(
         [FromQuery] DateOnly? reportingPeriodFrom,
         [FromQuery] DateOnly? reportingPeriodTo,
@@ -113,24 +115,17 @@ sealed class ReferenceReport : QuartoReport
         [FromQuery] string[] hospitalFilter,
         [FromQuery] bool? testUnitFilter,
         [FromQuery] bool? defaultPatientFilter,
+        [FromServices] IWebHostEnvironment environment,
+        [FromServices] ILogger<ReferenceReport> logger,
         HttpRequest httpRequest,
         CancellationToken cancellationToken
     )
     {
        using var report = new ReferenceReport(reportingPeriodFrom, reportingPeriodTo, birthWeightFrom, birthWeightTo, gestationalAgeFrom,
-                gestationalAgeTo, countryFilter, hospitalFilter, testUnitFilter, defaultPatientFilter, httpRequest);
+                gestationalAgeTo, countryFilter, hospitalFilter, testUnitFilter, defaultPatientFilter, httpRequest, environment, logger);
 
        return await report.Render(cancellationToken);
     }
-
-    protected override string? GetFileDownloadName() =>
-        ResponseContentType switch
-        {
-            "application/pdf" => $"NeoIPC-Surveillance-Reference-Report_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}.pdf",
-            "application/json" =>
-                $"NeoIPC-Surveillance-Reference-Report_{DateTime.UtcNow:yyyy-MM-dd_HH-mm-ss}.json",
-            _ => null
-        };
 
     private static readonly FrozenDictionary<string, string> TranslatedFiles;
     private static readonly FrozenDictionary<string, MediaTypeHeaderValue> SupportedMediaTypeHeaderValues =
