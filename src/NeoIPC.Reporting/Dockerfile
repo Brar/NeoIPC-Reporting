@@ -18,7 +18,9 @@ RUN export QUARTO_VERSION="1.7.34" && \
         perl \
         pandoc \
         fonts-ebgaramond \
-        fonts-ebgaramond-extra && \
+        fonts-ebgaramond-extra \
+        locales && \
+    locale-gen de_DE.UTF-8 en_GB.UTF-8 es_ES.UTF-8 et_EE.UTF-8 it_IT.UTF-8 tr_TR.UTF-8 && \
     add-apt-repository -y "deb https://cloud.r-project.org/bin/linux/ubuntu $(lsb_release -cs)-cran40/" && \
     apt-get -qq update && \
     apt-get -qq install --no-install-recommends r-base && \

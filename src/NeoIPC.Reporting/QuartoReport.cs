@@ -104,7 +104,10 @@ abstract class QuartoReport : IDisposable
             WorkingDirectory = ReportDir.FullName,
             EnvironmentVariables =
             {
-                ["NEOIPC_DHIS2_SESSION_ID"] = SessionId
+                ["NEOIPC_DHIS2_SESSION_ID"] = SessionId,
+                ["LANGUAGE="] = "en_GB:en",
+                ["LANG"] = "C.utf8",
+                ["LC_ALL"] = "C.utf8"
             }
         };
         using var quartoRenderProcess = Process.Start(startInfo);
@@ -169,9 +172,13 @@ abstract class QuartoReport : IDisposable
                     currentLogLevel == LogLevel.Error &&
                     Regex.IsMatch(message, @"NotFound: No such file or directory \(os error 2\): rename '/tmp/quarto_report_.+/-' -> '/tmp/quarto_report_.+/_output/-'") )
                 {
+                    if (sb.Length > 0)
+                        Logger.Log(previousLogLevel, "Quarto render process {QuartoRenderProcessId}: {Message}",
+                            quartoRenderProcess.Id, sb.ToString());
+
                     Logger.LogDebug(
                         "Quarto render process {QuartoRenderProcessId}: Hit well-known Quarto bug (https://github.com/quarto-dev/quarto-cli/issues/13394)\n{ Message}",
-                        quartoRenderProcess.Id, sb.ToString());
+                        quartoRenderProcess.Id, message);
                     sb.Length = 0;
                     success = true;
                     continue;
@@ -233,6 +240,7 @@ abstract class QuartoReport : IDisposable
                 break;
             case "application/pdf":
                 yield return "pdf";
+                yield return "--pdf-engine=lualatex";
                 break;
             default:
                 throw new ArgumentOutOfRangeException();
