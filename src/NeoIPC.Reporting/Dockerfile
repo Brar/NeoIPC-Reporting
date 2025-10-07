@@ -1,10 +1,7 @@
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 ADD --chown=1 --chmod=644 --checksum=sha256:ffa734347fd95fd7393f575448ba5e52cf3137067db77224d4857863351e4e8f https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc
 ADD https://github.com/NeoIPC/Surveillance-Toolkit.git#main:reports /reports
-# Quarto 1.8+ currently has a problem precluding the combination of the html minimal mode and a brand
-# See: https://github.com/quarto-dev/quarto-cli/issues/13383
-# RUN export QUARTO_VERSION="1.8.24" && \
-RUN export QUARTO_VERSION="1.7.34" && \
+RUN export QUARTO_VERSION="1.8.25" && \
     apt-get -qq update && \
     apt-get -qq install --no-install-recommends \
         software-properties-common \
