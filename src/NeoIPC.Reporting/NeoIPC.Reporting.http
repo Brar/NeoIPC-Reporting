@@ -13,3 +13,16 @@ GET {{NeoIPC_Reporting_HostAddress}}/reference-report/
 Accept: application/pdf
 Accept-Language: {{Accept_Language}}
 Cookie: {{JsessionIdCookie}}
+
+### Get Reference Report as PDF for country
+GET {{NeoIPC_Reporting_HostAddress}}/reference-report/?countryFilter=GR
+Accept: application/pdf
+Accept-Language: {{Accept_Language}}
+Cookie: {{JsessionIdCookie}}
+
+
+### Get Reference Report as PDF for two countries
+GET {{NeoIPC_Reporting_HostAddress}}/reference-report/?countryFilter=GR&countryFilter=ES
+Accept: application/pdf
+Accept-Language: {{Accept_Language}}
+Cookie: {{JsessionIdCookie}}

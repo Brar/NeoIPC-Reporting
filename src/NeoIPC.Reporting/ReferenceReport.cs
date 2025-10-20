@@ -1,109 +1,10 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
-using System.Collections.Frozen;
-using System.Text.RegularExpressions;
+using NeoIPC.Reporting;
+using System.Collections.Immutable;
 
-namespace NeoIPC.Reporting;
-
-sealed class ReferenceReport : QuartoReport
+class ReferenceReport
 {
-    protected override string SessionId { get; }
-    protected override string[] ReportParameters { get; }
-    protected override string? ResponseContentType { get; }
-    protected override string ReportFileName { get; }
-
-    public ReferenceReport(DateOnly? reportingPeriodFrom,
-        DateOnly? reportingPeriodTo,
-        ushort? birthWeightFrom,
-        ushort? birthWeightTo,
-        ushort? gestationalAgeFrom,
-        ushort? gestationalAgeTo,
-        string[] countryFilter,
-        string[] hospitalFilter,
-        bool? testUnitFilter,
-        bool? defaultPatientFilter,
-        HttpRequest httpRequest,
-        IWebHostEnvironment environment,
-        ILogger<ReferenceReport> logger) : base("Reference Report", environment, logger)
-    {
-        List<string> reportParameters = [];
-        if (reportingPeriodFrom.HasValue)
-            reportParameters.Add($"reportingPeriodFrom:{reportingPeriodFrom:yyyy-MM-dd}");
-
-        if (reportingPeriodTo.HasValue)
-            reportParameters.Add($"reportingPeriodTo:{reportingPeriodTo:yyyy-MM-dd}");
-
-        if (birthWeightFrom.HasValue)
-            reportParameters.Add($"birthWeightFrom:{birthWeightFrom}");
-
-        if (birthWeightTo.HasValue)
-            reportParameters.Add($"birthWeightTo:{birthWeightTo}");
-
-        if (gestationalAgeFrom.HasValue)
-            reportParameters.Add($"gestationalAgeFrom:{gestationalAgeFrom}");
-
-        if (birthWeightTo.HasValue)
-            reportParameters.Add($"gestationalAgeTo:{gestationalAgeTo}");
-
-        if (countryFilter.Length > 0)
-            reportParameters.Add($"countryFilter:{string.Join(",", countryFilter)}");
-
-        if (hospitalFilter.Length > 0)
-            reportParameters.Add($"hospitalFilter:{string.Join(",", hospitalFilter)}");
-
-        if (testUnitFilter != null)
-            reportParameters.Add($"testUnitFilter:{testUnitFilter}");
-
-        if (defaultPatientFilter != null)
-            reportParameters.Add($"defaultPatientFilter:{defaultPatientFilter}");
-        ReportParameters = reportParameters.ToArray();
-
-        var headers = httpRequest.GetTypedHeaders();
-        SessionId = headers.Cookie.FirstOrDefault(cookieHeaderValue => cookieHeaderValue is
-        { Name: { HasValue: true, Value: "JSESSIONID" }, Value.HasValue: true })
-            ?.Value.ToString() ?? throw new ArgumentException("JSESSIONID is missing.");
-
-        var mediaTypeSort = new List<(double Quality, int Location, string? MediaType)>();
-        for (var i = 0; i < headers.Accept.Count; i++)
-        {
-            var requestedMediaTypeHeaderValue = headers.Accept[i];
-            var mediaType = requestedMediaTypeHeaderValue.MediaType.ToString();
-            var quality = requestedMediaTypeHeaderValue.Quality ?? 1.0;
-            if (SupportedMediaTypeHeaderValues.ContainsKey(mediaType))
-                mediaTypeSort.Add((quality, i, mediaType));
-            else
-                mediaTypeSort.AddRange(SupportedMediaTypeHeaderValues.Values
-                    .Where(supportedMediaTypeHeaderValue =>
-                        supportedMediaTypeHeaderValue.IsSubsetOf(requestedMediaTypeHeaderValue))
-                    .Select(mediaTypeHeaderValue =>
-                        (quality * 0.9, i, (string?)mediaTypeHeaderValue.MediaType.ToString())));
-        }
-
-        ResponseContentType = mediaTypeSort.OrderByDescending(s => s.Quality).ThenBy(s => s.Location).FirstOrDefault().MediaType;
-
-        var acceptLanguageSort = new List<(double Quality, int Location, string? FileName)>();
-        // Todo: Look at RFC 4647 and see if we can do better language matching
-        for (var i = 0; i < headers.AcceptLanguage.Count; i++)
-        {
-            var acceptLanguageHeader = headers.AcceptLanguage[i];
-            var language = acceptLanguageHeader.Value.ToString();
-            var quality = acceptLanguageHeader.Quality ?? 1.0;
-            if (TranslatedFiles.TryGetValue(language, out var f))
-                acceptLanguageSort.Add((quality, i, f));
-            else if (language.Contains('-'))
-            {
-                var neutralLanguage = language.Split('-')[0];
-                if (TranslatedFiles.TryGetValue(neutralLanguage, out f))
-                {
-                    acceptLanguageSort.Add((quality * 0.9, i, f));
-                }
-            }
-        }
-
-        ReportFileName = acceptLanguageSort.OrderByDescending(s => s.Quality).ThenBy(s => s.Location).FirstOrDefault().FileName ?? "Reference Report.qmd";
-
-    }
-
     public static async Task<IResult> Get(
         [FromQuery] DateOnly? reportingPeriodFrom,
         [FromQuery] DateOnly? reportingPeriodTo,
@@ -118,34 +19,127 @@ sealed class ReferenceReport : QuartoReport
         [FromServices] IWebHostEnvironment environment,
         [FromServices] ILogger<ReferenceReport> logger,
         HttpRequest httpRequest,
-        CancellationToken cancellationToken
-    )
+        CancellationToken cancellationToken)
     {
-       using var report = new ReferenceReport(reportingPeriodFrom, reportingPeriodTo, birthWeightFrom, birthWeightTo, gestationalAgeFrom,
-                gestationalAgeTo, countryFilter, hospitalFilter, testUnitFilter, defaultPatientFilter, httpRequest, environment, logger);
+        var referenceReportParameters = new ReferenceReportParameters(
+            reportingPeriodFrom,
+            reportingPeriodTo,
+            birthWeightFrom,
+            birthWeightTo,
+            gestationalAgeFrom,
+            gestationalAgeTo,
+            countryFilter,
+            hospitalFilter,
+            testUnitFilter,
+            defaultPatientFilter,
+            httpRequest);
 
-       return await report.Render(cancellationToken);
+        if (referenceReportParameters.AcceptHeaders == null || referenceReportParameters.AcceptLanguageHeaders == null)
+            return Results.StatusCode(406);
+
+        await using var generator = GetReportGenerator(referenceReportParameters, environment, logger);
+        if (generator == null)
+            return Results.StatusCode(415);
+        var dataResult = await generator.Generate(cancellationToken);
+        return dataResult.Result;
     }
 
-    private static readonly FrozenDictionary<string, string> TranslatedFiles;
-    private static readonly FrozenDictionary<string, MediaTypeHeaderValue> SupportedMediaTypeHeaderValues =
-        new[] { "application/json", "text/html", "application/pdf" }.Select(s => new KeyValuePair<string, MediaTypeHeaderValue>(s, new MediaTypeHeaderValue(s)))
-            .ToFrozenDictionary(StringComparer.Ordinal);
-
-    static ReferenceReport()
+    static IDataGenerator? GetReportGenerator(ReferenceReportParameters referenceReportParameters, IWebHostEnvironment environment, ILogger<ReferenceReport> logger)
     {
+        var acceptHeaders = referenceReportParameters.AcceptHeaders;
+        var acceptLanguageHeaders = referenceReportParameters.AcceptLanguageHeaders;
+        if (acceptHeaders.IsDefaultOrEmpty || acceptLanguageHeaders.IsDefaultOrEmpty)
+            return null;
 
-        var baseDir = new DirectoryInfo("/reports/Reference Report");
-        var t = new Dictionary<string, string> { { "en", "Reference Report.qmd" }, { "en-GB", "Reference Report.qmd" } };
-
-        foreach (var file in baseDir.EnumerateFiles("Reference Report.*.qmd", SearchOption.TopDirectoryOnly))
+        // Format has priority over language
+        foreach (var acceptHeader in acceptHeaders)
         {
-#pragma warning disable SYSLIB1045
-            var locale = Regex.Replace(file.Name, @"Reference Report\.(.+)\.qmd", "$1");
-#pragma warning restore SYSLIB1045
-            t.Add(locale, file.Name);
+            var mediaType = acceptHeader.MediaType.ToString();
+            if (QuartoReportGenerator.SupportedMediaTypeHeaderValues.ContainsKey(mediaType))
+            {
+                var generator = FindByLanguages(acceptLanguageHeaders,
+                    language => QuartoReferenceReportGenerator.SupportedLanguageDictionary.ContainsKey(language),
+                    language => new QuartoReferenceReportGenerator(mediaType, language, referenceReportParameters, environment, logger));
+                if (generator is not null) return generator;
+            }
+
+            if (RScriptReportGenerator.SupportedMediaTypeHeaderValues.ContainsKey(mediaType))
+            {
+                var generator = FindByLanguages(acceptLanguageHeaders,
+                    language => RScriptReferenceReportGenerator.SupportedLanguageDictionary.ContainsKey(language),
+                    language => new RScriptReferenceReportGenerator(mediaType, language, environment, logger));
+                if (generator != null) return generator;
+            }
         }
-        TranslatedFiles = t.ToFrozenDictionary(StringComparer.Ordinal);
+
+        // Subset matches next
+        foreach (var acceptHeader in acceptHeaders)
+        foreach (var mediaType in ReturnMediaTypePriorityList)
+        {
+            if (QuartoReportGenerator.SupportedMediaTypeHeaderValues.TryGetValue(mediaType, out var quartoValue) &&
+                quartoValue.IsSubsetOf(acceptHeader))
+            {
+                var generator = FindByLanguages(acceptLanguageHeaders,
+                    language => QuartoReferenceReportGenerator.SupportedLanguageDictionary.ContainsKey(language),
+                    language => new QuartoReferenceReportGenerator(mediaType, language, referenceReportParameters, environment, logger));
+                if (generator != null) return generator;
+            }
+
+            if (RScriptReportGenerator.SupportedMediaTypeHeaderValues.TryGetValue(mediaType, out var rScriptValue) &&
+                rScriptValue.IsSubsetOf(acceptHeader))
+            {
+                var generator = FindByLanguages(acceptLanguageHeaders,
+                    language => RScriptReferenceReportGenerator.SupportedLanguageDictionary.ContainsKey(language),
+                    language => new RScriptReferenceReportGenerator(mediaType, language, environment, logger));
+                if (generator != null) return generator;
+            }
+        }
+
+        return null;
+
+        // Helper to find a generator based on language preferences. It tries exact matches first, then "neutral" matches (language before '-').
+        static IDataGenerator? FindByLanguages(ImmutableArray<StringWithQualityHeaderValue> languages, Func<string, bool> isSupportedLanguage, Func<string, IDataGenerator> factory)
+        {
+            // Exact matches first
+            foreach (var lang in languages)
+            {
+                var language = lang.Value.ToString();
+                if (isSupportedLanguage(language))
+                    return factory(language);
+            }
+
+            // Neutral matches next
+            foreach (var lang in languages)
+            {
+                var parts = lang.Value.ToString().Split('-');
+                if (parts.Length < 2) continue;
+                var neutralLanguage = parts[0];
+                if (isSupportedLanguage(neutralLanguage))
+                    return factory(neutralLanguage);
+            }
+
+            return null;
+        }
     }
 
+    public static IEnumerable<MediaTypeHeaderValue> SortHeaders(IList<MediaTypeHeaderValue> headers)
+        => headers
+            .Select((h, index) => (h.MediaType, Quality: h.Quality ?? 1.0, Index: index, Value: h))
+            .Where(h => h.MediaType.HasValue)
+            .OrderByDescending(h => h.Quality).ThenBy(h => h.Index)
+            .Select(h => h.Value);
+
+    public static IEnumerable<StringWithQualityHeaderValue> SortHeaders(IList<StringWithQualityHeaderValue> headers)
+        => headers
+            .Select((h, index) => (Quality: h.Quality ?? 1.0, Index: index, Language: h.Value, Value: h))
+            .Where(h => h.Language.HasValue)
+            .OrderByDescending(h => h.Quality).ThenBy(h => h.Index)
+            .Select(h => h.Value);
+
+    // Priority list for return media types when doing subset matches.
+    // Higher priority types are checked first.
+    // This helps ensure that, for example, HTML is returned when multiple types are acceptable
+    // even if the client did not explicitly request it in their Accept header.
+    // This list must contain all media types we want to consider for subset matching.
+    static readonly ImmutableArray<string> ReturnMediaTypePriorityList = ["text/html", "application/json", "application/pdf"];
 }

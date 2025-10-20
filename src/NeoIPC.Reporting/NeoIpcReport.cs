@@ -5,9 +5,9 @@ using System.Text.RegularExpressions;
 
 namespace NeoIPC.Reporting;
 
-abstract class QuartoReport : IDisposable
+abstract partial class NeoIPCReport : IDisposable
 {
-    private bool _disposedValue;
+    bool _disposedValue;
     protected IWebHostEnvironment Environment { get; }
     protected ILogger Logger { get; }
     protected DirectoryInfo ReportDir { get; }
@@ -45,7 +45,7 @@ abstract class QuartoReport : IDisposable
         };
     }
 
-    static QuartoReport()
+    static NeoIPCReport()
     {
         var filtersDir = new DirectoryInfo(Path.Join(Path.GetTempPath(), "filters"));
         if (filtersDir.Exists)
@@ -65,7 +65,7 @@ abstract class QuartoReport : IDisposable
                 srcFile.FullName));
     }
 
-    protected QuartoReport(string reportDir, IWebHostEnvironment environment, ILogger logger)
+    protected NeoIPCReport(string reportDir, IWebHostEnvironment environment, ILogger logger)
     {
         Environment = environment;
         Logger = logger;
@@ -121,9 +121,9 @@ abstract class QuartoReport : IDisposable
 
         await quartoRenderProcess.WaitForExitAsync(cancellationToken);
 
-        var success = false;
         if (quartoRenderProcess.ExitCode != 0)
         {
+            var success = false;
             var stdErrString = await stdErr;
             if (!string.IsNullOrWhiteSpace(stdErrString))
                 Console.WriteLine(stdErrString);
@@ -170,7 +170,7 @@ abstract class QuartoReport : IDisposable
                 // See: https://github.com/quarto-dev/quarto-cli/issues/13394
                 if (quartoRenderProcess.ExitCode == 1 &&
                     currentLogLevel == LogLevel.Error &&
-                    Regex.IsMatch(message, @"NotFound: No such file or directory \(os error 2\): rename '/tmp/quarto_report_.+/-' -> '/tmp/quarto_report_.+/_output/-'") )
+                    QuartoIssue13394DetectionRegex().IsMatch(message))
                 {
                     if (sb.Length > 0)
                         Logger.Log(previousLogLevel, "Quarto render process {QuartoRenderProcessId}: {Message}",
@@ -211,7 +211,7 @@ abstract class QuartoReport : IDisposable
         return Results.Stream(buffer, ResponseContentType, GetFileDownloadName());
     }
 
-    private IEnumerable<string> GetArguments()
+    IEnumerable<string> GetArguments()
     {
         yield return "render";
         yield return ReportFileName;
@@ -279,4 +279,7 @@ abstract class QuartoReport : IDisposable
         }
         _disposedValue = true;
     }
+
+    [GeneratedRegex(@"NotFound: No such file or directory \(os error 2\): rename '/tmp/quarto_report_.+/-' -> '/tmp/quarto_report_.+/_output/-'")]
+    private static partial Regex QuartoIssue13394DetectionRegex();
 }

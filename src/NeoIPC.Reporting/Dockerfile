@@ -17,7 +17,7 @@ RUN export QUARTO_VERSION="1.8.25" && \
         fonts-ebgaramond \
         fonts-ebgaramond-extra \
         locales && \
-    locale-gen de_DE.UTF-8 en_GB.UTF-8 es_ES.UTF-8 et_EE.UTF-8 it_IT.UTF-8 tr_TR.UTF-8 && \
+    locale-gen de_DE.UTF-8 el_GR.UTF-8 en_GB.UTF-8 es_ES.UTF-8 et_EE.UTF-8 it_IT.UTF-8 tr_TR.UTF-8 && \
     add-apt-repository -y "deb https://cloud.r-project.org/bin/linux/ubuntu $(lsb_release -cs)-cran40/" && \
     apt-get -qq update && \
     apt-get -qq install --no-install-recommends r-base && \
@@ -38,7 +38,7 @@ RUN export QUARTO_VERSION="1.8.25" && \
     echo '</fontconfig>' >> /etc/fonts/conf.d/70-no-woff.conf
 USER $APP_UID
 RUN wget -qO- "https://yihui.org/tinytex/install-bin-unix.sh" | sh && \
-    /home/app/.TinyTeX/bin/x86_64-linux/tlmgr install koma-script anyfontsize multirow placeins tcolorbox fontawesome5 colortbl wrapfig tikzfill pdfcol caption && \
+    /home/app/.TinyTeX/bin/x86_64-linux/tlmgr install babel babel-english babel-estonian babel-german babel-greek babel-italian babel-spanish babel-turkish koma-script anyfontsize multirow placeins tcolorbox fontawesome5 colortbl wrapfig tikzfill pdfcol caption && \
     /home/app/.TinyTeX/bin/x86_64-linux/tlmgr path add
 WORKDIR /app
 EXPOSE 8080

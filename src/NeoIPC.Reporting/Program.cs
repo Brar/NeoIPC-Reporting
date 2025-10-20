@@ -11,5 +11,12 @@ if (app.Environment.IsDevelopment())
 app.MapGet("reference-report", ReferenceReport.Get)
     .WithName("GetReferenceReport")
     .WithRequestTimeout(TimeSpan.FromSeconds(360));
+app.MapGet("partner-report", PartnerReport.Get)
+    .WithName("GetPartnerReport")
+    .WithRequestTimeout(TimeSpan.FromSeconds(360));
+
+//app.MapGet("reference-report-snapshots", () => { });
+//app.MapPost("reference-report-snapshots", () => { });
+//app.MapDelete("reference-report-snapshots", () => { });
 
 app.Run();
