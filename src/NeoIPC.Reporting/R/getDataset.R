@@ -92,9 +92,9 @@ url_group$add_argument(
   default="/api",
   help="API base path on the DHIS2 host")
 
-#credential_group <- parser$add_argument_group("Credential settings")
-#ecg <- credential_group$add_mutually_exclusive_group()
-ecg <- parser$add_mutually_exclusive_group()
+credential_group <- parser$add_argument_group("Credential settings")
+ecg <- credential_group$add_mutually_exclusive_group()
+#ecg <- parser$add_mutually_exclusive_group()
 ecg$add_argument(
   "--token",
   type="character",

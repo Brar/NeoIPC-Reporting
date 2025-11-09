@@ -16,6 +16,7 @@ class ReferenceReport
         [FromQuery] string[] hospitalFilter,
         [FromQuery] bool? testUnitFilter,
         [FromQuery] bool? defaultPatientFilter,
+        [FromQuery] bool? save,
         [FromServices] IWebHostEnvironment environment,
         [FromServices] ILogger<ReferenceReport> logger,
         HttpRequest httpRequest,
@@ -32,6 +33,7 @@ class ReferenceReport
             hospitalFilter,
             testUnitFilter,
             defaultPatientFilter,
+            save,
             httpRequest);
 
         if (referenceReportParameters.AcceptHeaders == null || referenceReportParameters.AcceptLanguageHeaders == null)
@@ -67,7 +69,7 @@ class ReferenceReport
             {
                 var generator = FindByLanguages(acceptLanguageHeaders,
                     language => RScriptReferenceReportGenerator.SupportedLanguageDictionary.ContainsKey(language),
-                    language => new RScriptReferenceReportGenerator(mediaType, language, environment, logger));
+                    language => new RScriptReferenceReportGenerator(mediaType, language, referenceReportParameters, environment, logger));
                 if (generator != null) return generator;
             }
         }
@@ -90,7 +92,7 @@ class ReferenceReport
             {
                 var generator = FindByLanguages(acceptLanguageHeaders,
                     language => RScriptReferenceReportGenerator.SupportedLanguageDictionary.ContainsKey(language),
-                    language => new RScriptReferenceReportGenerator(mediaType, language, environment, logger));
+                    language => new RScriptReferenceReportGenerator(mediaType, language, referenceReportParameters, environment, logger));
                 if (generator != null) return generator;
             }
         }
@@ -142,4 +144,7 @@ class ReferenceReport
     // even if the client did not explicitly request it in their Accept header.
     // This list must contain all media types we want to consider for subset matching.
     static readonly ImmutableArray<string> ReturnMediaTypePriorityList = ["text/html", "application/json", "application/pdf"];
+
+    static ReferenceReport()
+        => Directory.CreateDirectory("/home/app/NeoIPC/ReferenceData", UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 }

@@ -2,6 +2,24 @@
 @JsessionIdCookie = JSESSIONID=XXXXXXXXXXXXXXXXXXXXXXXXX
 @Accept_Language = en
 
+### Get Reference Report as JSON
+GET {{NeoIPC_Reporting_HostAddress}}/reference-report/
+Accept: application/json
+Accept-Language: {{Accept_Language}}
+Cookie: {{JsessionIdCookie}}
+
+### Get Reference Report as JSON and save to file
+GET {{NeoIPC_Reporting_HostAddress}}/reference-report/?save=true
+Accept: application/json
+Accept-Language: {{Accept_Language}}
+Cookie: {{JsessionIdCookie}}
+
+### Get Reference Report as JSON for two countries
+GET {{NeoIPC_Reporting_HostAddress}}/reference-report/?countryFilter=GR&countryFilter=ES
+Accept: application/json
+Accept-Language: {{Accept_Language}}
+Cookie: {{JsessionIdCookie}}
+
 ### Get Reference Report as HTML
 GET {{NeoIPC_Reporting_HostAddress}}/reference-report/
 Accept: text/html

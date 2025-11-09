@@ -23,7 +23,7 @@ RUN export QUARTO_VERSION="1.8.25" && \
     apt-get -qq install --no-install-recommends r-base && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get -qq clean && \
-    Rscript -e 'install.packages("pak", repos = sprintf("https://r-lib.github.io/p/pak/stable/%s/%s/%s", .Platform$pkgType, R.Version()$os, R.Version()$arch));pak::pkg_install(c("rmarkdown","knitr","tidyverse","smplot2","scales","patchwork","gt","Brar/neoipcr@TowardsReferenceReport"), ask = FALSE);' > /dev/null && \
+    Rscript -e 'install.packages("pak", repos = sprintf("https://r-lib.github.io/p/pak/stable/%s/%s/%s", .Platform$pkgType, R.Version()$os, R.Version()$arch));pak::pkg_install(c("argparse","rmarkdown","knitr","tidyverse","smplot2","scales","patchwork","gt","Brar/neoipcr@TowardsReferenceReport"), ask = FALSE);' > /dev/null && \
     mkdir -p /opt/quarto/${QUARTO_VERSION} && \
     curl -so quarto.tar.gz -L "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUARTO_VERSION}/quarto-${QUARTO_VERSION}-linux-amd64.tar.gz" && \
     tar -zxf quarto.tar.gz -C "/opt/quarto/${QUARTO_VERSION}" --strip-components=1 && \

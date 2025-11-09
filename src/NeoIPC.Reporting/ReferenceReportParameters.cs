@@ -18,6 +18,7 @@ readonly struct ReferenceReportParameters
         string[] hospitalFilter,
         bool? testUnitFilter,
         bool? defaultPatientFilter,
+        bool? save,
         HttpRequest httpRequest)
     {
         ReportingPeriodFrom = reportingPeriodFrom;
@@ -30,6 +31,7 @@ readonly struct ReferenceReportParameters
         HospitalFilter = [..hospitalFilter];
         TestUnitFilter = testUnitFilter;
         DefaultPatientFilter = defaultPatientFilter;
+        Save = save;
         var headers = httpRequest.GetTypedHeaders();
         SessionId = headers.Cookie.FirstOrDefault(cookieHeaderValue => cookieHeaderValue is
                 { Name: { HasValue: true, Value: "JSESSIONID" }, Value.HasValue: true })
@@ -47,6 +49,7 @@ readonly struct ReferenceReportParameters
     public ushort? GestationalAgeTo { get; }
     public bool? TestUnitFilter { get; }
     public bool? DefaultPatientFilter { get; }
+    public bool? Save { get; }
     public string SessionId { get; }
     public ImmutableArray<string> CountryFilter { get; }
     public ImmutableArray<string> HospitalFilter { get; }
@@ -196,7 +199,7 @@ readonly struct ReferenceReportParameters
         return true;
     }
 
-    public void Deconstruct(out DateOnly? ReportingPeriodFrom, out DateOnly? ReportingPeriodTo, out ushort? BirthWeightFrom, out ushort? BirthWeightTo, out ushort? GestationalAgeFrom, out ushort? GestationalAgeTo, out ImmutableArray<string> CountryFilter, out ImmutableArray<string> HospitalFilter, out bool? TestUnitFilter, out bool? DefaultPatientFilter, out ImmutableArray<MediaTypeHeaderValue> AcceptHeaders, out ImmutableArray<StringWithQualityHeaderValue> AcceptLanguageHeaders)
+    public void Deconstruct(out DateOnly? ReportingPeriodFrom, out DateOnly? ReportingPeriodTo, out ushort? BirthWeightFrom, out ushort? BirthWeightTo, out ushort? GestationalAgeFrom, out ushort? GestationalAgeTo, out ImmutableArray<string> CountryFilter, out ImmutableArray<string> HospitalFilter, out bool? TestUnitFilter, out bool? DefaultPatientFilter, out bool? Save, out ImmutableArray<MediaTypeHeaderValue> AcceptHeaders, out ImmutableArray<StringWithQualityHeaderValue> AcceptLanguageHeaders)
     {
         ReportingPeriodFrom = this.ReportingPeriodFrom;
         ReportingPeriodTo = this.ReportingPeriodTo;
@@ -210,5 +213,6 @@ readonly struct ReferenceReportParameters
         DefaultPatientFilter = this.DefaultPatientFilter;
         AcceptHeaders = this.AcceptHeaders;
         AcceptLanguageHeaders = this.AcceptLanguageHeaders;
+        Save = this.Save;
     }
 }
