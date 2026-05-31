@@ -15,7 +15,7 @@ sealed partial class QuartoReferenceReportGenerator :
         ReportFileName = SupportedLanguageDictionary[language];
     }
 
-    const string DirName = "Reference Report";
+    const string DirName = "Reference-Report";
     const string ReportsSourceDirConst = ReportsSourceDir + "/" + DirName;
     protected override string ReportFileDownloadName => "Reference-Report";
     protected override string ReportFileName { get; }
@@ -60,8 +60,8 @@ sealed partial class QuartoReferenceReportGenerator :
         if (!reportSourceDir.Exists)
             throw new DirectoryNotFoundException($"Report directory '{reportSourceDir.FullName}' not found.");
 
-        var t = new Dictionary<string, string> { { "en", "Reference Report.qmd" }, { "en-GB", "Reference Report.qmd" } };
-        foreach (var file in reportSourceDir.EnumerateFiles("Reference Report.*.qmd", SearchOption.TopDirectoryOnly))
+        var t = new Dictionary<string, string> { { "en", "Reference-Report.qmd" }, { "en-GB", "Reference-Report.qmd" } };
+        foreach (var file in reportSourceDir.EnumerateFiles("Reference-Report.*.qmd", SearchOption.TopDirectoryOnly))
         {
             var locale = GetReferenceReportTranslationFileRegex().Replace(file.Name, "$1");
             t.Add(locale, file.Name);
@@ -69,6 +69,6 @@ sealed partial class QuartoReferenceReportGenerator :
         SupportedLanguageDictionary = t.ToFrozenDictionary(StringComparer.Ordinal);
     }
 
-    [GeneratedRegex(@"Reference Report\.(.+)\.qmd")]
+    [GeneratedRegex(@"Reference-Report\.(.+)\.qmd")]
     private static partial Regex GetReferenceReportTranslationFileRegex();
 }
