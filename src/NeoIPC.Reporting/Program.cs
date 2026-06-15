@@ -106,14 +106,21 @@ builder.Services
     .AddScheme<Dhis2SessionAuthenticationOptions, Dhis2SessionAuthenticationHandler>(
         Dhis2SessionAuthenticationDefaults.AuthenticationScheme, _ => { });
 
-// One policy today: require the DHIS2 superuser authority (gate on
-// the /admin/* endpoints and conditionally on /reference-report's
-// ad-hoc preview mode). Future migration to a NeoIPC-specific
-// authority is captured in tasks/replace-neoipc-reportapp-js.md.
+// Two NeoIPC authority tiers (DHIS2 superuser ALL satisfies both):
+//   - NeoIpcReport (F_NEOIPC_REPORT) gates report viewing — partner
+//     reports and reference-report stored-data mode.
+//   - NeoIpcAdmin (F_NEOIPC_ADMIN) gates the admin endpoints and
+//     reference-report's live ad-hoc preview mode.
+// RequireClaim with several values is OR-matched, so each higher tier
+// is folded into the lower-tier policy.
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("RequiresAll",
-        p => p.RequireClaim(Dhis2ClaimTypes.Authority, Authorities.All));
+    options.AddPolicy("NeoIpcReport", p => p.RequireClaim(
+        Dhis2ClaimTypes.Authority,
+        Authorities.F.NeoipcReport, Authorities.F.NeoipcAdmin, Authorities.All));
+    options.AddPolicy("NeoIpcAdmin", p => p.RequireClaim(
+        Dhis2ClaimTypes.Authority,
+        Authorities.F.NeoipcAdmin, Authorities.All));
 });
 
 var app = builder.Build();
@@ -127,52 +134,10 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseRequestTimeouts();
 
-app.MapGet("reference-report", ReferenceReport.Get)
-    .WithName("GetReferenceReport")
-    .WithRequestTimeout(TimeSpan.FromSeconds(360));
-app.MapGet("reference-report/parameters", () =>
-        Results.Ok(new { fields = ReferenceReportApiParameters.Schema }))
-    .WithName("GetReferenceReportParameters");
-app.MapGet("partner-report", PartnerReport.Get)
-    .WithName("GetPartnerReport")
-    .WithRequestTimeout(TimeSpan.FromSeconds(600));
-app.MapPost("partner-report", PartnerReport.Post)
-    .WithName("PostPartnerReport")
-    .DisableAntiforgery()
-    .WithRequestTimeout(TimeSpan.FromSeconds(600));
-app.MapGet("partner-report/parameters", () =>
-        Results.Ok(new { fields = PartnerReportApiParameters.Schema }))
-    .WithName("GetPartnerReportParameters");
-
-// Public-tier listing — any authenticated user, no specific authority.
-// Partners pick a referenceDataId from this listing to feed into
-// /reference-report (stored-data mode).
-app.MapGet("reference-data", ReferenceDataEndpoints.List)
-    .WithName("ListReferenceData")
-    .RequireAuthorization();
-
-// Everything under /admin/* requires the superuser authority.
-var admin = app.MapGroup("admin").RequireAuthorization("RequiresAll");
-
-admin.MapGet("reference-data", ReferenceDataEndpoints.AdminList)
-    .WithName("AdminListReferenceData");
-admin.MapGet("reference-data/{id}", ReferenceDataEndpoints.AdminDownload)
-    .WithName("AdminDownloadReferenceData");
-admin.MapPost("reference-data", ReferenceDataEndpoints.AdminUpload)
-    .WithName("AdminUploadReferenceData")
-    .DisableAntiforgery()
-    .WithRequestTimeout(TimeSpan.FromSeconds(120));
-admin.MapDelete("reference-data/{id}", ReferenceDataEndpoints.AdminDelete)
-    .WithName("AdminDeleteReferenceData");
-
-admin.MapGet("validation-exceptions", ValidationExceptionEndpoints.AdminList)
-    .WithName("AdminListValidationExceptions");
-admin.MapGet("validation-exceptions/{id}", ValidationExceptionEndpoints.AdminDownload)
-    .WithName("AdminDownloadValidationException");
-admin.MapPost("validation-exceptions", ValidationExceptionEndpoints.AdminUpload)
-    .WithName("AdminUploadValidationException")
-    .DisableAntiforgery();
-admin.MapDelete("validation-exceptions/{id}", ValidationExceptionEndpoints.AdminDelete)
-    .WithName("AdminDeleteValidationException");
+// Endpoint mapping lives in ApiEndpoints so the endpoint set is
+// unit-testable: EndpointAuthorizationTests asserts every endpoint is
+// route-authorized, marked InHandlerAuthorized, or marked PublicEndpoint
+// (no endpoint silently public).
+ApiEndpoints.Map(app);
 
 app.Run();
