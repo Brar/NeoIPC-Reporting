@@ -74,6 +74,15 @@ abstract partial class ExternalProcessReportProducer : IDataProducer
         }
         catch (Exception e)
         {
+            // A client disconnect mid-render surfaces as a cancellation on the request token. Renders are
+            // slow, so that is a routine, non-error event: let it propagate (the framework handles the
+            // aborted request) rather than logging it as a failure or turning it into a 500.
+            if (e is OperationCanceledException && cancellationToken.IsCancellationRequested)
+                throw;
+            // Any other throw before output otherwise vanishes: the DataResult only surfaces the message
+            // in Development, so in Production the caller sees a bare 500 with no trace of the cause. Log
+            // it so production render failures are diagnosable.
+            Logger.LogError(e, "Report generation process threw before producing output.");
             return new DataResult(e, showMessage: Environment.IsDevelopment());
         }
     }

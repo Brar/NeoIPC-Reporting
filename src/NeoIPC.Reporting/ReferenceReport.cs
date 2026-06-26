@@ -70,7 +70,10 @@ class ReferenceReport
         [FromQuery] bool? includeOrganismResistanceRateTable,
         [FromQuery] bool? includeAntibioticResistanceTestRateTable,
         [FromQuery] bool? includeSecondaryBsiRateTable,
-        [FromQuery] bool fragmentMode,
+        // Nullable so it stays optional: a non-nullable bool is a *required* minimal-API query
+        // parameter (an absent value fails model binding with a 400). Defaults to true below — HTML
+        // is always inlined for the app; pass fragmentMode=false for a standalone HTML document.
+        [FromQuery] bool? fragmentMode,
         [FromServices] IOptions<ReportingOptions> options,
         [FromServices] ReportLanguageRegistry registry,
         [FromServices] ReferenceDataStorage referenceDataStorage,
@@ -188,7 +191,7 @@ class ReferenceReport
         {
             var dataResult = await generator.Generate(cancellationToken);
             return await HtmlFragmentTransformer.MaybeFragmentize(
-                dataResult, generator.MediaType, fragmentMode, cancellationToken);
+                dataResult, generator.MediaType, fragmentMode ?? true, cancellationToken);
         }
     }
 

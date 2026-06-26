@@ -360,12 +360,15 @@ ADD --checksum=sha256:ea8c897368791ad9f200010c087ea3111b2e556b12a960487dd4e21690
 ADD --checksum=sha256:066e20cdb882994160e18524a552b97e03648eb9aa0c7cdf5680a6493be65ab2 \
     https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-${ESBUILD_VERSION}.tgz \
     /tmp/esbuild.tgz
+# Replace Quarto's bundled esbuild with the pinned build, then drop only the tools we don't use.
+# Keep tools/x86_64/deno — it is Quarto's runtime (the `quarto` launcher execs it for every command),
+# so removing it breaks ALL rendering with exit 127. We render via LaTeX (not typst) and don't use
+# Jupyter, so those two are safe to drop.
 RUN mkdir -p /opt/quarto && \
     tar -zxf /tmp/quarto.tar.gz -C /opt/quarto --strip-components=1 && \
     tar -zxf /tmp/esbuild.tgz -C /tmp && \
     cp /tmp/package/bin/esbuild /opt/quarto/bin/tools/x86_64/esbuild && \
-    rm -rf /opt/quarto/bin/tools/x86_64/deno* \
-           /opt/quarto/bin/tools/x86_64/typst* \
+    rm -rf /opt/quarto/bin/tools/x86_64/typst* \
            /opt/quarto/share/jupyter
 
 # ----------------------------------------------------------------------------

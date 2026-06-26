@@ -75,7 +75,10 @@ class PartnerReport
         [FromQuery] bool? includeOrganismResistanceRateTable,
         [FromQuery] bool? includeAntibioticResistanceTestRateTable,
         [FromQuery] bool? includeSecondaryBsiRateTable,
-        [FromQuery] bool fragmentMode,
+        // Nullable so it stays optional: a non-nullable bool is a *required* minimal-API query
+        // parameter (an absent value fails model binding with a 400). Defaults to true below — HTML
+        // is always inlined for the app; pass fragmentMode=false for a standalone HTML document.
+        [FromQuery] bool? fragmentMode,
         [FromServices] IOptions<ReportingOptions> options,
         [FromServices] ReportLanguageRegistry registry,
         [FromServices] ReferenceDataStorage referenceDataStorage,
@@ -105,7 +108,7 @@ class PartnerReport
                 includeSecondaryBsiRateTable,
                 httpRequest),
             partnerDataBody: null,
-            fragmentMode,
+            fragmentMode ?? true,
             options, registry, referenceDataStorage, validationExceptionStorage, dhis2Endpoint,
             authorizationService, environment, logger, httpContext, cancellationToken);
     }
@@ -132,7 +135,10 @@ class PartnerReport
         [FromQuery] bool? includeOrganismResistanceRateTable,
         [FromQuery] bool? includeAntibioticResistanceTestRateTable,
         [FromQuery] bool? includeSecondaryBsiRateTable,
-        [FromQuery] bool fragmentMode,
+        // Nullable so it stays optional: a non-nullable bool is a *required* minimal-API query
+        // parameter (an absent value fails model binding with a 400). Defaults to true below — HTML
+        // is always inlined for the app; pass fragmentMode=false for a standalone HTML document.
+        [FromQuery] bool? fragmentMode,
         [FromServices] IOptions<ReportingOptions> options,
         [FromServices] ReportLanguageRegistry registry,
         [FromServices] ReferenceDataStorage referenceDataStorage,
@@ -169,7 +175,7 @@ class PartnerReport
                 includeSecondaryBsiRateTable,
                 httpRequest),
             partnerDataBody: httpRequest.Body,
-            fragmentMode,
+            fragmentMode ?? true,
             options, registry, referenceDataStorage, validationExceptionStorage, dhis2Endpoint,
             authorizationService, environment, logger, httpContext, cancellationToken);
     }

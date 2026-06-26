@@ -279,8 +279,15 @@ abstract partial class QuartoReportProducer : ExternalProcessReportProducer
             Logger.LogDebug("{StdErr}", stdErrString);
 
         if (!File.Exists(_quartoLogFilePath))
+        {
+            // Quarto exited non-zero before writing its structured log (e.g. an early startup error):
+            // the only signal is stderr, which is logged at Debug above and so is invisible in
+            // Production. Surface the exit code + stderr so this failure mode is diagnosable.
+            Logger.LogError("Quarto render process {QuartoRenderProcessId} exited {ExitCode} without writing a log file. Stderr: {StdErr}",
+                processId, exitCode, stdErrString);
             return new DataResult(detail: "The Quarto log file does not exist.", statusCode: 500,
                 showMessage: Environment.IsDevelopment());
+        }
 
         var minLevel = LogLevel.None;
         for (var i = LogLevel.Trace; i < LogLevel.Critical; i++)
