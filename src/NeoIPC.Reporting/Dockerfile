@@ -1,5 +1,37 @@
 # syntax=docker/dockerfile:1.7
 
+# ----------------------------------------------------------------------------
+# Pinned upstream versions — central inventory. Bump deliberately and validate a
+# full build; never ride a rolling tag.
+#   * Base images are pinned by digest (the readable tag stays for humans; the
+#     digest is what BuildKit resolves). Refresh one with:
+#       docker buildx imagetools inspect <image>:<tag> --format '{{.Manifest.Digest}}'
+#     A digest pin freezes the base image, so .NET / OS-layer security patches
+#     arrive only on a deliberate digest bump — the `base` stage's `apt upgrade`
+#     still pulls resolute security updates for the apt-managed libraries.
+#   * Version ARGs hold the bare number (no leading `v`); the `v` is prepended at
+#     the URL where the upstream tag carries one (TinyTeX, Quarto).
+#   * The TinyTeX / Quarto / esbuild `ADD --checksum` values are version-coupled
+#     and stay inline at their ADD lines — bump the checksum together with the
+#     matching version ARG here.
+#   * TINYTEX_TLNET_SNAPSHOT must track TINYTEX_VERSION (its tlmgr revision has to
+#     match the bundle's — see the tinytex-builder stage).
+# ----------------------------------------------------------------------------
+ARG DOTNET_ASPNET_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0-resolute@sha256:0aa8645b7e7c83630bdb5ca096a91e2e4a356e9236ec1c01bb471a7410bb18a9
+ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0-resolute@sha256:196f61c6262aa890f41dd654ff52d3b995187124a37778fb990ed0c31c26da44
+ARG ALPINE_GIT_IMAGE=alpine/git:v2.52.0@sha256:4a0e72d49596a1f5d3701aeedafdadc5c0da4062be4657c7bdc4017387f591cc
+ARG TINYTEX_VERSION=2026.05
+ARG TINYTEX_TLNET_SNAPSHOT=2026/05/02
+ARG QUARTO_VERSION=1.9.38
+ARG ESBUILD_VERSION=0.27.3
+# r-base-core anchor. Currently the transient r2u stopgap value (held at 4.6.0
+# while r2u catches up to CRAN's 4.6.1 — see the r-runtime stage); becomes the
+# deliberate R anchor once that skew heals. The r-cran-* packages are NOT pinned:
+# r2u is a rolling current-CRAN mirror with no dated snapshots and no old-version
+# retention, so a version pin can't be held — they track CRAN, and a deliberate
+# validated rebuild is the reproducibility unit.
+ARG RBASECORE_VERSION=4.6.0
+
 # Three reports-source modes selected via build-arg REPORTS_SOURCE:
 #   github-branch   - default. Clone ${REPORTS_REPO} at branch ${REPORTS_BRANCH}
 #                     with submodules. The repo + branch overrides exist so a
@@ -33,14 +65,14 @@ ARG NEOIPCR_TAG=
 # The toolkit's localization pipeline depends on tools/po4a/ (a submodule).
 # Docker's `ADD <git-url>` does NOT recurse submodules, so use git clone.
 
-FROM alpine/git:v2.52.0 AS toolkit-source-github-branch
+FROM ${ALPINE_GIT_IMAGE} AS toolkit-source-github-branch
 ARG REPORTS_REPO
 ARG REPORTS_BRANCH
 RUN git clone --recurse-submodules --depth 1 --branch "${REPORTS_BRANCH}" \
     "${REPORTS_REPO}" /toolkit && \
     rm -rf /toolkit/.git /toolkit/tools/po4a/.git
 
-FROM alpine/git:v2.52.0 AS toolkit-source-github-tag
+FROM ${ALPINE_GIT_IMAGE} AS toolkit-source-github-tag
 ARG REPORTS_REPO
 ARG REPORTS_TAG
 RUN test -n "${REPORTS_TAG}" || (echo "REPORTS_TAG build-arg required when REPORTS_SOURCE=github-tag" >&2; exit 1) && \
@@ -55,7 +87,7 @@ RUN test -n "${REPORTS_TAG}" || (echo "REPORTS_TAG build-arg required when REPOR
 # NeoIPC-Reporting submodule root), so the build stage's "src/..." COPY
 # paths don't have to know which mode is active. Requires
 # `git submodule update --init tools/po4a` in the source checkout.
-FROM alpine/git:v2.52.0 AS toolkit-source-workspace
+FROM ${ALPINE_GIT_IMAGE} AS toolkit-source-workspace
 COPY --from=surveillance-toolkit . /toolkit
 RUN rm -rf /toolkit/.git /toolkit/tools/po4a/.git
 
@@ -68,17 +100,16 @@ FROM toolkit-source-${REPORTS_SOURCE} AS toolkit-source
 # Invoke-Localization.ps1 is the toolkit's authoritative entry point: validates
 # string layers, updates po4a YAML keys, runs po4a per config, regenerates the
 # glossary. Running the wrapper directly keeps us aligned with whatever the
-# pipeline shape is upstream (no reimplementation drift). Base is the official
-# PowerShell-on-Debian image so we don't pay the cost of installing pwsh on
-# top of aspnet:10.0; this stage is build-only and discarded.
+# pipeline shape is upstream (no reimplementation drift). The wrapper imports the NeoIPC-Tools module, which
+# requires PowerShell >= 7.6, so the base is the .NET SDK image — the source Microsoft now points to for
+# PowerShell in Docker (the standalone powershell image is deprecated and caps at 7.5). sdk:10.0-resolute
+# ships pwsh 7.6. Build-only stage, discarded.
 
-FROM mcr.microsoft.com/powershell:7.4-debian-12 AS reports-builder
+FROM ${DOTNET_SDK_IMAGE} AS reports-builder
 ARG DEBIAN_FRONTEND=noninteractive
 
-# The base image exports LANG/LC_ALL=en_US.UTF-8, which this build-only stage never
-# generates, so Perl/po4a warn and fall back to the "C" locale. C.UTF-8 is built
-# into glibc (no locale-gen needed) and is UTF-8-aware, giving the pipeline a valid
-# locale without the warning.
+# Force a valid UTF-8 locale for Perl / po4a (which otherwise warn and fall back to the "C" locale when the
+# base image's locale isn't generated). C.UTF-8 is built into glibc (no locale-gen needed) and is UTF-8-aware.
 ENV LC_ALL=C.UTF-8 LANG=C.UTF-8
 
 # Dependencies the pipeline invokes: Perl + the modules po4a actually loads
@@ -158,8 +189,9 @@ RUN set -eu; \
 # binary debs, so apt-get install r-cran-* completes in seconds with no
 # compilation.
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS r-runtime
+FROM ${DOTNET_ASPNET_IMAGE} AS r-runtime
 ARG DEBIAN_FRONTEND=noninteractive
+ARG RBASECORE_VERSION
 
 # CRAN apt key — needed for r-base-core (newer than Ubuntu's r-base-core).
 ADD --chown=1 --chmod=644 --checksum=sha256:ffa734347fd95fd7393f575448ba5e52cf3137067db77224d4857863351e4e8f \
@@ -183,6 +215,18 @@ EOF
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
+    # r2u is a single university-hosted mirror that intermittently drops a .deb mid-download from CI runners
+    # ("OpenSSL ... unexpected eof while reading"). Retry fetches and disable HTTP pipelining so a dropped
+    # connection re-fetches the one file instead of failing the whole apt batch.
+    printf 'Acquire::Retries "5";\nAcquire::http::Pipeline-Depth "0";\n' > /etc/apt/apt.conf.d/80-retries && \
+    # Transient stopgap: boost r-base-core to the RBASECORE_VERSION anchor. CRAN's r-base-core 4.6.1 declares
+    # `Breaks: r-cran-rlang (< 1.2.0-5~)` while r2u still serves rlang 1.2.0-1 — a CRAN-vs-r2u release lag that
+    # makes the whole r-cran-* set unresolvable; 4.6.0 lacks that Breaks, so the install resolves. This is a
+    # version-glob pin (priority 1001 only boosts a *present* 4.6.0): once r2u advances past it the glob matches
+    # nothing and apt falls back to the current r-base-core — the build never breaks, it just holds R at 4.6.0
+    # until removed. Drop this pin once r2u serves r-cran-rlang >= 1.2.0-5. (printf, not a COPY heredoc, so it
+    # can consume the RBASECORE_VERSION ARG.)
+    printf 'Package: r-base-core\nPin: version %s-*\nPin-Priority: 1001\n' "${RBASECORE_VERSION}" > /etc/apt/preferences.d/98-rbasecore-stopgap && \
     apt-get -qq update && \
     apt-get -qq install --no-install-recommends \
         software-properties-common \
@@ -273,18 +317,31 @@ RUN find /usr/local/lib/R/site-library -type d \
 # ----------------------------------------------------------------------------
 # Stage: TinyTeX + the babel set the toolkit's reports use.
 # ----------------------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS tinytex-builder
+FROM ${DOTNET_ASPNET_IMAGE} AS tinytex-builder
 ARG DEBIAN_FRONTEND=noninteractive
+ARG TINYTEX_VERSION
+ARG TINYTEX_TLNET_SNAPSHOT
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     apt-get -qq update && \
-    apt-get -qq install --no-install-recommends perl wget fontconfig xz-utils
+    apt-get -qq install --no-install-recommends perl wget fontconfig xz-utils gnupg
+# TinyTeX v2026.05 (published 2026-05-01) ships TeX Live 2026's tlmgr (texlive-scripts r78861). The install
+# below pins tlmgr to the frozen tlnet snapshot whose tlmgr revision MATCHES this bundle's — the 2026-05-02
+# archive (the 05-01 archive carries r78852, one revision too old, which tlmgr rejects as "older than local").
+# When bumping this bundle, find the matching snapshot date the same way: tlmgr reports "older than local
+# installation" if the pin is too old and "tlmgr itself needs to be updated" if it is too new.
 ADD --chmod=644 --checksum=sha256:ef6c552b2959744f449213fb124e58954a235e7d41ad191e48080869728ae451 \
-    https://github.com/rstudio/tinytex-releases/releases/download/v2026.05/TinyTeX-1-linux-x86_64-v2026.05.tar.xz \
+    https://github.com/rstudio/tinytex-releases/releases/download/v${TINYTEX_VERSION}/TinyTeX-1-linux-x86_64-v${TINYTEX_VERSION}.tar.xz \
     /tmp/TinyTeX.tar.xz
 USER $APP_UID
+# Pin tlmgr to the frozen tlnet snapshot dated to this bundle instead of the rolling tlnet.yihui.org mirror.
+# The rolling mirror advances its tlmgr revision past the bundle's, so `tlmgr install` self-terminates
+# demanding `tlmgr update --self`; the dated archive snapshot matches the bundle's tlmgr, so install just
+# works — and being immutable it makes the installed package set reproducible build-to-build. gnupg (added
+# above) lets tlmgr verify the snapshot's signature rather than warning "gpg unavailable".
 RUN tar xf /tmp/TinyTeX.tar.xz -C $HOME && \
+    ~/.TinyTeX/bin/x86_64-linux/tlmgr option repository https://texlive.info/tlnet-archive/${TINYTEX_TLNET_SNAPSHOT}/tlnet && \
     ~/.TinyTeX/bin/x86_64-linux/tlmgr install \
         babel babel-english babel-estonian babel-german babel-greek \
         babel-italian babel-spanish babel-turkish \
@@ -294,12 +351,14 @@ RUN tar xf /tmp/TinyTeX.tar.xz -C $HOME && \
 # ----------------------------------------------------------------------------
 # Stage: Quarto (only the linux-amd64 binaries we need).
 # ----------------------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS quarto-downloader
+FROM ${DOTNET_ASPNET_IMAGE} AS quarto-downloader
+ARG QUARTO_VERSION
+ARG ESBUILD_VERSION
 ADD --checksum=sha256:ea8c897368791ad9f200010c087ea3111b2e556b12a960487dd4e216902aa102 \
-    https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.38/quarto-1.9.38-linux-amd64.tar.gz \
+    https://github.com/quarto-dev/quarto-cli/releases/download/v${QUARTO_VERSION}/quarto-${QUARTO_VERSION}-linux-amd64.tar.gz \
     /tmp/quarto.tar.gz
 ADD --checksum=sha256:066e20cdb882994160e18524a552b97e03648eb9aa0c7cdf5680a6493be65ab2 \
-    https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.27.3.tgz \
+    https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-${ESBUILD_VERSION}.tgz \
     /tmp/esbuild.tgz
 RUN mkdir -p /opt/quarto && \
     tar -zxf /tmp/quarto.tar.gz -C /opt/quarto --strip-components=1 && \
@@ -320,10 +379,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     apt-get -qq update && \
-    # Pull Ubuntu (noble) security updates into the runtime image for packages
+    # Pull Ubuntu (resolute) security updates into the runtime image for packages
     # inherited from r-runtime / the aspnet base — gnutls28, libgcrypt20,
     # xz-utils, expat, cairo, python3, etc. — so it ships the latest
-    # noble-patched versions rather than the base image's snapshot.
+    # resolute-patched versions rather than the base image's snapshot.
     apt-get -qq upgrade -y && \
     apt-get -qq install --no-install-recommends \
         fonts-ebgaramond \
@@ -410,7 +469,7 @@ FROM base-neoipcr-${NEOIPCR_SOURCE} AS final-base
 # Surveillance-Toolkit access is needed at compile time. The reports-builder
 # stage is still consumed by the final image for runtime rendering.
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM ${DOTNET_SDK_IMAGE} AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["src/NeoIPC.Reporting/NeoIPC.Reporting.csproj", "src/NeoIPC.Reporting/"]
