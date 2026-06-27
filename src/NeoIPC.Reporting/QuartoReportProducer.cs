@@ -134,6 +134,14 @@ abstract partial class QuartoReportProducer : ExternalProcessReportProducer
             if (string.Equals(srcChild.Name, reportName, StringComparison.Ordinal))
                 continue;
             if (srcChild.Name == ".gitignore") continue;
+            // A .quarto at the reports-source root is Quarto's regenerable scratch
+            // dir, never a source input. Dir-symlinking it would point Quarto's
+            // read-write cache targets (project-cache/deno-kv-file) back into the
+            // read-only source mount — the same failure the per-report mirror's
+            // IsUnderQuartoScratch filter prevents. Skip it here too (defensive:
+            // Quarto only opens the report's own .quarto, not a sibling's).
+            if (string.Equals(srcChild.Name, QuartoScratchDirName, StringComparison.Ordinal))
+                continue;
             var linkPath = Path.Join(reportsParent.FullName, srcChild.Name);
             if (srcChild is DirectoryInfo)
                 Directory.CreateSymbolicLink(linkPath, srcChild.FullName);
@@ -160,24 +168,47 @@ abstract partial class QuartoReportProducer : ExternalProcessReportProducer
 
         // Per-report dir: file-by-file symlink mirror, since Quarto writes
         // intermediates here and we need the read-write surface to be
-        // private to this render.
+        // private to this render. Quarto's own scratch/cache directory
+        // (.quarto) is excluded from the mirror: it is regenerated on every
+        // render and is not a source input. A host-side .quarto left by a
+        // developer who rendered the report directly would otherwise be
+        // mirrored as symlinks pointing back into the read-only source mount,
+        // including .quarto/project-cache/deno-kv-file — and Quarto opens that
+        // KV file read-write, so the render fails to open its project cache
+        // ("unable to open database file").
         var reportDir = reportsParent.CreateSubdirectory(reportName);
-        Parallel.ForEach(srcDir.EnumerateDirectories("*", SearchOption.AllDirectories),
+        Parallel.ForEach(
+            srcDir.EnumerateDirectories("*", SearchOption.AllDirectories)
+                .Where(d => !IsUnderQuartoScratch(srcDir, d)),
             srcChild => Directory.CreateDirectory(Path.Join(reportDir.FullName,
                 Path.GetRelativePath(srcDir.FullName, srcChild.FullName))));
-        Parallel.ForEach(srcDir.EnumerateFiles("*", SearchOption.AllDirectories),
+        Parallel.ForEach(
+            srcDir.EnumerateFiles("*", SearchOption.AllDirectories)
+                .Where(f => f.Name != ".gitignore" && !IsUnderQuartoScratch(srcDir, f)),
             srcFile =>
-            {
-                if (srcFile.Name != ".gitignore")
-                    File.CreateSymbolicLink(
-                        Path.Join(reportDir.FullName,
-                            Path.GetRelativePath(srcDir.FullName, srcFile.FullName)),
-                        srcFile.FullName);
-            });
+                File.CreateSymbolicLink(
+                    Path.Join(reportDir.FullName,
+                        Path.GetRelativePath(srcDir.FullName, srcFile.FullName)),
+                    srcFile.FullName));
 
         _renderRoot = renderRoot;
         _workingDirectory = reportDir;
         _quartoLogFilePath = Path.Join(reportDir.FullName, "quarto-log.json");
+    }
+
+    // Quarto's per-project scratch/cache directory. Never a source input
+    // (Quarto recreates it each render); excluded from the symlink-forest
+    // mirror so its read-write targets are not symlinked back to the
+    // read-only source mount — see the per-report mirror in the constructor.
+    const string QuartoScratchDirName = ".quarto";
+
+    static bool IsUnderQuartoScratch(DirectoryInfo srcRoot, FileSystemInfo entry)
+    {
+        var segments = Path.GetRelativePath(srcRoot.FullName, entry.FullName)
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries);
+        return Array.Exists(segments,
+            s => string.Equals(s, QuartoScratchDirName, StringComparison.Ordinal));
     }
 
     /// <summary>
