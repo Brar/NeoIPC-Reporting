@@ -352,10 +352,12 @@ USER $APP_UID
 RUN tar xf /tmp/TinyTeX.tar.xz -C $HOME && \
     ~/.TinyTeX/bin/x86_64-linux/tlmgr option repository https://texlive.info/tlnet-archive/${TINYTEX_TLNET_SNAPSHOT}/tlnet && \
     ~/.TinyTeX/bin/x86_64-linux/tlmgr install \
-        babel babel-english babel-estonian babel-german babel-greek \
-        babel-italian babel-spanish babel-turkish \
-        koma-script anyfontsize multirow placeins tcolorbox fontawesome5 \
-        colortbl wrapfig tikzfill pdfcol caption
+        anyfontsize babel babel-english babel-estonian babel-german \
+        babel-greek babel-italian babel-spanish babel-turkish caption \
+        colortbl fontawesome5 footnotehyper koma-script luatexbase \
+        microtype multirow parskip pdfcol placeins \
+        selnolig tcolorbox tikzfill upquote wrapfig \
+        xurl
 
 # ----------------------------------------------------------------------------
 # Stage: Quarto (only the linux-amd64 binaries we need).

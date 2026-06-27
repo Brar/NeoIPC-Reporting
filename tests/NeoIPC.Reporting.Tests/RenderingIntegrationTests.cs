@@ -91,8 +91,12 @@ public class RenderingIntegrationTests
         using var client = ExternalDhis2Fixture.CreateReportingClient(_session);
         client.Timeout = TimeSpan.FromMinutes(10); // live import + R/Quarto render
 
+        // The seed targets a synthetic *test* department ({CC}_TEST_TEST), which the
+        // report excludes by default (include_test_data = false) — so the department
+        // would resolve to zero org units and the DHIS2 query would 409. Request test
+        // data so the render resolves the seeded department.
         using var request = new HttpRequestMessage(HttpMethod.Get,
-            $"partner-report?unitCodes={Uri.EscapeDataString(department!)}");
+            $"partner-report?unitCodes={Uri.EscapeDataString(department!)}&includeTestData=true");
         request.Headers.Add("Accept", "application/pdf");
         request.Headers.Add("Accept-Language", "en");
 
