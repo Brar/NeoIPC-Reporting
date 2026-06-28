@@ -86,7 +86,7 @@ class PartnerReport
         [FromServices] Dhis2Endpoint dhis2Endpoint,
         [FromServices] IAuthorizationService authorizationService,
         [FromServices] IWebHostEnvironment environment,
-        [FromServices] ILogger<PartnerReport> logger,
+        [FromServices] ILoggerFactory loggerFactory,
         HttpRequest httpRequest,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -110,7 +110,7 @@ class PartnerReport
             partnerDataBody: null,
             fragmentMode ?? true,
             options, registry, referenceDataStorage, validationExceptionStorage, dhis2Endpoint,
-            authorizationService, environment, logger, httpContext, cancellationToken);
+            authorizationService, environment, loggerFactory, httpContext, cancellationToken);
     }
 
     public static async Task<IResult> Post(
@@ -146,7 +146,7 @@ class PartnerReport
         [FromServices] Dhis2Endpoint dhis2Endpoint,
         [FromServices] IAuthorizationService authorizationService,
         [FromServices] IWebHostEnvironment environment,
-        [FromServices] ILogger<PartnerReport> logger,
+        [FromServices] ILoggerFactory loggerFactory,
         HttpRequest httpRequest,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -177,7 +177,7 @@ class PartnerReport
             partnerDataBody: httpRequest.Body,
             fragmentMode ?? true,
             options, registry, referenceDataStorage, validationExceptionStorage, dhis2Endpoint,
-            authorizationService, environment, logger, httpContext, cancellationToken);
+            authorizationService, environment, loggerFactory, httpContext, cancellationToken);
     }
 
     static PartnerReportApiParameters BuildApiParameters(
@@ -247,7 +247,7 @@ class PartnerReport
         Dhis2Endpoint dhis2Endpoint,
         IAuthorizationService authorizationService,
         IWebHostEnvironment environment,
-        ILogger logger,
+        ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
@@ -293,7 +293,7 @@ class PartnerReport
 
         var (generator, problem) = SelectProducer(
             apiParameters, renderParameters, partnerDataBody is not null,
-            quartoLanguages, options, registry, environment, logger);
+            quartoLanguages, options, registry, environment, loggerFactory);
         if (problem is not null) return problem;
         if (generator is null) return Results.StatusCode(415);
 
@@ -365,7 +365,7 @@ class PartnerReport
         IOptions<ReportingOptions> options,
         ReportLanguageRegistry registry,
         IWebHostEnvironment environment,
-        ILogger logger)
+        ILoggerFactory loggerFactory)
     {
         var quartoSupported = quartoLanguages.Keys.ToHashSet(StringComparer.Ordinal);
         var rScriptSupported = RScriptPartnerReportProducer.SupportedLanguageDictionary.Keys
@@ -378,7 +378,7 @@ class PartnerReport
             if (QuartoReportProducer.SupportedMediaTypeHeaderValues.ContainsKey(mediaType))
             {
                 var (gen, problem) = TryQuarto(mediaType, apiParameters, renderParameters,
-                    quartoSupported, options, registry, environment, logger);
+                    quartoSupported, options, registry, environment, loggerFactory);
                 if (problem is not null) return (null, problem);
                 if (gen is not null) return (gen, null);
             }
@@ -387,7 +387,7 @@ class PartnerReport
                 RScriptReportProducer.SupportedMediaTypeHeaderValues.ContainsKey(mediaType))
             {
                 var (gen, problem) = TryRScript(mediaType, apiParameters, renderParameters,
-                    rScriptSupported, options, environment, logger);
+                    rScriptSupported, options, environment, loggerFactory);
                 if (problem is not null) return (null, problem);
                 if (gen is not null) return (gen, null);
             }
@@ -401,7 +401,7 @@ class PartnerReport
                 quartoValue.IsSubsetOf(acceptHeader))
             {
                 var (gen, problem) = TryQuarto(mediaType, apiParameters, renderParameters,
-                    quartoSupported, options, registry, environment, logger);
+                    quartoSupported, options, registry, environment, loggerFactory);
                 if (problem is not null) return (null, problem);
                 if (gen is not null) return (gen, null);
             }
@@ -412,7 +412,7 @@ class PartnerReport
                 rScriptValue.IsSubsetOf(acceptHeader))
             {
                 var (gen, problem) = TryRScript(mediaType, apiParameters, renderParameters,
-                    rScriptSupported, options, environment, logger);
+                    rScriptSupported, options, environment, loggerFactory);
                 if (problem is not null) return (null, problem);
                 if (gen is not null) return (gen, null);
             }
@@ -429,7 +429,7 @@ class PartnerReport
         IOptions<ReportingOptions> options,
         ReportLanguageRegistry registry,
         IWebHostEnvironment environment,
-        ILogger logger)
+        ILoggerFactory loggerFactory)
     {
         var resolution = LocaleResolver.Resolve(apiParameters.Locale,
             apiParameters.AcceptLanguageHeaders, supportedLanguages);
@@ -441,7 +441,7 @@ class PartnerReport
                     $"The 'locale' parameter '{apiParameters.Locale}' is not supported by this report.")),
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>
                 (new QuartoPartnerReportProducer(mediaType, loc, apiParameters, renderParameters,
-                    options, registry, environment, logger), null),
+                    options, registry, environment, loggerFactory), null),
             _ => (null, null),
         };
     }
@@ -453,7 +453,7 @@ class PartnerReport
         IReadOnlyCollection<string> supportedLanguages,
         IOptions<ReportingOptions> options,
         IWebHostEnvironment environment,
-        ILogger logger)
+        ILoggerFactory loggerFactory)
     {
         var resolution = LocaleResolver.Resolve(apiParameters.Locale,
             apiParameters.AcceptLanguageHeaders, supportedLanguages);
@@ -465,7 +465,7 @@ class PartnerReport
                     $"The 'locale' parameter '{apiParameters.Locale}' is not supported by this report.")),
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>
                 (new RScriptPartnerReportProducer(mediaType, loc, apiParameters, renderParameters,
-                    options, environment, logger), null),
+                    options, environment, loggerFactory), null),
             _ => (null, null),
         };
     }
