@@ -134,6 +134,14 @@ abstract partial class QuartoReportProducer : ExternalProcessReportProducer
             if (string.Equals(srcChild.Name, reportName, StringComparison.Ordinal))
                 continue;
             if (srcChild.Name == ".gitignore") continue;
+            // A .quarto at the reports-source root is Quarto's regenerable scratch
+            // dir, never a source input. Dir-symlinking it would point Quarto's
+            // read-write cache targets (project-cache/deno-kv-file) back into the
+            // read-only source mount — the same failure the per-report mirror's
+            // IsUnderQuartoScratch filter prevents. Skip it here too (defensive:
+            // Quarto only opens the report's own .quarto, not a sibling's).
+            if (string.Equals(srcChild.Name, QuartoScratchDirName, StringComparison.Ordinal))
+                continue;
             var linkPath = Path.Join(reportsParent.FullName, srcChild.Name);
             if (srcChild is DirectoryInfo)
                 Directory.CreateSymbolicLink(linkPath, srcChild.FullName);
@@ -160,24 +168,47 @@ abstract partial class QuartoReportProducer : ExternalProcessReportProducer
 
         // Per-report dir: file-by-file symlink mirror, since Quarto writes
         // intermediates here and we need the read-write surface to be
-        // private to this render.
+        // private to this render. Quarto's own scratch/cache directory
+        // (.quarto) is excluded from the mirror: it is regenerated on every
+        // render and is not a source input. A host-side .quarto left by a
+        // developer who rendered the report directly would otherwise be
+        // mirrored as symlinks pointing back into the read-only source mount,
+        // including .quarto/project-cache/deno-kv-file — and Quarto opens that
+        // KV file read-write, so the render fails to open its project cache
+        // ("unable to open database file").
         var reportDir = reportsParent.CreateSubdirectory(reportName);
-        Parallel.ForEach(srcDir.EnumerateDirectories("*", SearchOption.AllDirectories),
+        Parallel.ForEach(
+            srcDir.EnumerateDirectories("*", SearchOption.AllDirectories)
+                .Where(d => !IsUnderQuartoScratch(srcDir, d)),
             srcChild => Directory.CreateDirectory(Path.Join(reportDir.FullName,
                 Path.GetRelativePath(srcDir.FullName, srcChild.FullName))));
-        Parallel.ForEach(srcDir.EnumerateFiles("*", SearchOption.AllDirectories),
+        Parallel.ForEach(
+            srcDir.EnumerateFiles("*", SearchOption.AllDirectories)
+                .Where(f => f.Name != ".gitignore" && !IsUnderQuartoScratch(srcDir, f)),
             srcFile =>
-            {
-                if (srcFile.Name != ".gitignore")
-                    File.CreateSymbolicLink(
-                        Path.Join(reportDir.FullName,
-                            Path.GetRelativePath(srcDir.FullName, srcFile.FullName)),
-                        srcFile.FullName);
-            });
+                File.CreateSymbolicLink(
+                    Path.Join(reportDir.FullName,
+                        Path.GetRelativePath(srcDir.FullName, srcFile.FullName)),
+                    srcFile.FullName));
 
         _renderRoot = renderRoot;
         _workingDirectory = reportDir;
         _quartoLogFilePath = Path.Join(reportDir.FullName, "quarto-log.json");
+    }
+
+    // Quarto's per-project scratch/cache directory. Never a source input
+    // (Quarto recreates it each render); excluded from the symlink-forest
+    // mirror so its read-write targets are not symlinked back to the
+    // read-only source mount — see the per-report mirror in the constructor.
+    const string QuartoScratchDirName = ".quarto";
+
+    static bool IsUnderQuartoScratch(DirectoryInfo srcRoot, FileSystemInfo entry)
+    {
+        var segments = Path.GetRelativePath(srcRoot.FullName, entry.FullName)
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries);
+        return Array.Exists(segments,
+            s => string.Equals(s, QuartoScratchDirName, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -279,8 +310,15 @@ abstract partial class QuartoReportProducer : ExternalProcessReportProducer
             Logger.LogDebug("{StdErr}", stdErrString);
 
         if (!File.Exists(_quartoLogFilePath))
+        {
+            // Quarto exited non-zero before writing its structured log (e.g. an early startup error):
+            // the only signal is stderr, which is logged at Debug above and so is invisible in
+            // Production. Surface the exit code + stderr so this failure mode is diagnosable.
+            Logger.LogError("Quarto render process {QuartoRenderProcessId} exited {ExitCode} without writing a log file. Stderr: {StdErr}",
+                processId, exitCode, stdErrString);
             return new DataResult(detail: "The Quarto log file does not exist.", statusCode: 500,
                 showMessage: Environment.IsDevelopment());
+        }
 
         var minLevel = LogLevel.None;
         for (var i = LogLevel.Trace; i < LogLevel.Critical; i++)

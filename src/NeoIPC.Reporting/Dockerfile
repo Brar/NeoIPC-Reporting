@@ -168,7 +168,15 @@ RUN set -eu; \
     done; \
     for dir in reports/*/; do \
         if [ -f "${dir}$(basename "$dir").qmd" ]; then cp -r "$dir" /toolkit-output/reports/; fi; \
-    done
+    done; \
+    # Drop Quarto's per-project scratch/cache dir if a dirty source tree (e.g. a
+    # workspace-mode COPY of a working checkout where someone rendered a report
+    # locally) carried one in. It is regenerated on every render and /toolkit is
+    # made read-only in the final image, so a baked .quarto would symlink Quarto's
+    # write targets (project-cache/deno-kv-file) to read-only storage and every
+    # render would fail to open its project cache. The per-render symlink-forest
+    # (QuartoReportProducer) excludes it too; this is the build-phase half.
+    find /toolkit-output -type d -name .quarto -prune -exec rm -rf {} +
 
 # ----------------------------------------------------------------------------
 # Stage: r-runtime — shared parent for r-builder-base and the final-image
@@ -294,17 +302,18 @@ RUN --mount=type=cache,target=/root/.cache/R \
     test -n "${NEOIPCR_TAG}" || (echo "NEOIPCR_TAG build-arg required when NEOIPCR_SOURCE=github-tag" >&2; exit 1) && \
     Rscript -e 'pak::pkg_install(commandArgs(TRUE), ask = FALSE);' "${NEOIPCR_REPO}@${NEOIPCR_TAG}" > /dev/null
 
-# Variant: install devtools (for load_all) but NOT neoipcr itself; the
-# editable neoipcr is COPYed into the final image at /neoipcr and read
-# at render time via NEOIPCR_DEV_PATH. r-cran-devtools comes from r2u
-# as a binary — no source compile.
+# Variant: workspace mode installs NOTHING in the builder. neoipcr itself is not
+# packaged here — the editable copy is COPYed into the final image at /neoipcr and
+# read at render time via NEOIPCR_DEV_PATH (load_neoipcr -> devtools::load_all).
+# devtools is installed in the FINAL workspace stage (base-neoipcr-workspace), not
+# here: an apt `r-cran-devtools` (r2u binary) lands in /usr/lib/R/site-library,
+# which the final image inherits in place but does NOT copy from this builder
+# stage (it copies only /usr/local/lib/R/site-library), so a build-stage install
+# would never reach the image. Installing it directly in the final stage avoids
+# that — and uses the same proven r2u binary path as the rest of the R stack,
+# rather than pak (which could source-compile devtools' heavy system deps on a
+# brand-new Ubuntu when PPM lacks resolute binaries and the -dev headers are absent).
 FROM r-builder-base AS r-builder-workspace
-ARG DEBIAN_FRONTEND=noninteractive
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    rm -f /etc/apt/apt.conf.d/docker-clean && \
-    apt-get -qq update && \
-    apt-get -qq install --no-install-recommends r-cran-devtools
 
 # Selector + library cleanup (drops doc/help/html/examples/demo, strips .so).
 FROM r-builder-${NEOIPCR_SOURCE} AS r-builder
@@ -343,10 +352,12 @@ USER $APP_UID
 RUN tar xf /tmp/TinyTeX.tar.xz -C $HOME && \
     ~/.TinyTeX/bin/x86_64-linux/tlmgr option repository https://texlive.info/tlnet-archive/${TINYTEX_TLNET_SNAPSHOT}/tlnet && \
     ~/.TinyTeX/bin/x86_64-linux/tlmgr install \
-        babel babel-english babel-estonian babel-german babel-greek \
-        babel-italian babel-spanish babel-turkish \
-        koma-script anyfontsize multirow placeins tcolorbox fontawesome5 \
-        colortbl wrapfig tikzfill pdfcol caption
+        anyfontsize babel babel-english babel-estonian babel-german \
+        babel-greek babel-italian babel-spanish babel-turkish caption \
+        colortbl fontawesome5 footnotehyper koma-script luatexbase \
+        microtype multirow parskip pdfcol placeins \
+        selnolig tcolorbox tikzfill upquote wrapfig \
+        xurl
 
 # ----------------------------------------------------------------------------
 # Stage: Quarto (only the linux-amd64 binaries we need).
@@ -360,12 +371,15 @@ ADD --checksum=sha256:ea8c897368791ad9f200010c087ea3111b2e556b12a960487dd4e21690
 ADD --checksum=sha256:066e20cdb882994160e18524a552b97e03648eb9aa0c7cdf5680a6493be65ab2 \
     https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-${ESBUILD_VERSION}.tgz \
     /tmp/esbuild.tgz
+# Replace Quarto's bundled esbuild with the pinned build, then drop only the tools we don't use.
+# Keep tools/x86_64/deno — it is Quarto's runtime (the `quarto` launcher execs it for every command),
+# so removing it breaks ALL rendering with exit 127. We render via LaTeX (not typst) and don't use
+# Jupyter, so those two are safe to drop.
 RUN mkdir -p /opt/quarto && \
     tar -zxf /tmp/quarto.tar.gz -C /opt/quarto --strip-components=1 && \
     tar -zxf /tmp/esbuild.tgz -C /tmp && \
     cp /tmp/package/bin/esbuild /opt/quarto/bin/tools/x86_64/esbuild && \
-    rm -rf /opt/quarto/bin/tools/x86_64/deno* \
-           /opt/quarto/bin/tools/x86_64/typst* \
+    rm -rf /opt/quarto/bin/tools/x86_64/typst* \
            /opt/quarto/share/jupyter
 
 # ----------------------------------------------------------------------------
@@ -394,10 +408,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 # Attack-surface reduction: drop build-/desktop-only packages that have no role
 # at render time, so they neither ship in nor get scanned against the image.
-#   xdg-utils, packagekit, policykit-1   - desktop/D-Bus tooling, no daemon here
+#   packagekit, policykit-1              - desktop/D-Bus tooling, no daemon here
 #   elfutils                              - eu-* dev tools (libelf1/libdw1 kept)
 #   software-properties-common           - build-only (add-apt-repository)
 #   python3-cryptography, python3-jwt     - Python libs the .NET service never calls
+# Do NOT add xdg-utils here: r-base-core hard-Depends on it (for xdg-open behind
+# browseURL), so `apt purge xdg-utils` cascades out the entire R stack
+# (r-base-core + every r-cran-* package), leaving an image with R's site-library
+# but no R runtime — every report render then fails with "Failed to spawn
+# 'Rscript'". It is desktop tooling we never invoke, but apt will not keep R
+# installed without it, so it stays.
 # Named purge only — NO `autoremove`. A blanket `autoremove --purge` here also
 # sweeps fontconfig (whose /etc/fonts/conf.d the next step writes into, and
 # which the font-rendering path needs), so we remove only these targets and
@@ -406,7 +426,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get -qq purge -y \
-        xdg-utils packagekit policykit-1 elfutils \
+        packagekit policykit-1 elfutils \
         software-properties-common python3-cryptography python3-jwt
 
 # Runtime layout convention (matches the per-render layout in
@@ -419,10 +439,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 #       <Report>/                    (one dir per report)
 COPY --from=reports-builder /toolkit-output /toolkit
 
-# Bring neoipcr (and any extra packages r-builder added on top of r-runtime,
-# e.g. devtools in workspace mode) into the final image. Most of the
-# site-library is already populated from r-runtime; this COPY overlays the
-# variant-specific additions.
+# Bring whatever r-builder added on top of r-runtime into the final image: in the
+# github-branch / github-tag modes that is neoipcr (pak-installed into the builder's
+# site-library); in workspace mode r-builder adds nothing — neoipcr is the editable
+# /neoipcr copy and devtools is installed in base-neoipcr-workspace below. Most of the
+# site-library is already populated from r-runtime; this COPY overlays those additions.
 COPY --from=r-builder /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 COPY --from=quarto-downloader /opt/quarto /opt/quarto
 RUN ln -s /opt/quarto/bin/quarto /usr/local/bin/quarto && \
@@ -447,7 +468,19 @@ EXPOSE 8080
 # and so each variant bakes in the matching Reporting:BuildMode env.
 
 FROM base AS base-neoipcr-workspace
+ARG DEBIAN_FRONTEND=noninteractive
 USER root
+# devtools is needed only in workspace mode (load_neoipcr -> devtools::load_all of
+# the editable /neoipcr). Installed here, in the final image, as an r2u binary so it
+# lands in /usr/lib/R/site-library (on R's .libPaths) directly — the r2u apt repo is
+# already configured from the r-runtime stage. Doing it here (not in r-builder-workspace)
+# is deliberate: apt installs to /usr/lib, which the final image does NOT copy from the
+# builder, so a build-stage install would silently vanish.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    apt-get -qq update && \
+    apt-get -qq install --no-install-recommends r-cran-devtools
 COPY --from=neoipcr --chown=0:0 . /neoipcr
 RUN chmod -R a-w /neoipcr
 USER $APP_UID

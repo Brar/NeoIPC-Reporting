@@ -19,7 +19,7 @@ namespace NeoIPC.Reporting.Tests;
 /// instance up for isolation.
 /// </remarks>
 [TestFixture]
-[Category("Integration")]
+[Category("Container")]
 public class NegativePathTests
 {
     static readonly string ImageTag =

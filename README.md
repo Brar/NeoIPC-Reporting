@@ -12,19 +12,26 @@ with claims-based authorization derived from the user's DHIS2 authorities.
   that emits `<Report>RenderParameters` records and `Schema` data from the
   toolkit's master QMD `params:` blocks.
 - `tests/NeoIPC.Reporting.Tests/` — NUnit test project. `Category=Unit`
-  and `Category=Generator` run on every PR; `Category=Integration` spins
-  up the built image via Testcontainers and runs only on
-  `workflow_dispatch` (see `.github/workflows/build-and-test.yml`).
+  and `Category=Generator` run on every PR; `Category=Container` builds
+  the image and exercises it in isolation via Testcontainers, on
+  `workflow_dispatch` only; `Category=Integration` runs against a live,
+  seeded DHIS2 + reporting stack (configured through the `NEOIPC_*`
+  environment variables read by `ExternalDhis2Fixture`) and self-skips
+  when the stack is unreachable (see `.github/workflows/build-and-test.yml`).
 - `compose.yml` — minimal stack: Postgres + DHIS2 + this service + Traefik.
 
 ### Running tests locally
 
 ```bash
 # Unit + generator tests (no Docker needed)
-dotnet test --filter "Category!=Integration"
+dotnet test --filter "Category!=Integration&Category!=Container"
 
-# Integration tests (require a built image; uses NEOIPC_REPORTING_IMAGE_TAG
-# env var, defaults to neoipc-reporting:smoke-test)
+# Container smoke tests (build the image in isolation; uses
+# NEOIPC_REPORTING_IMAGE_TAG, defaults to neoipc-reporting:smoke-test)
+dotnet test --filter "Category=Container"
+
+# Integration tests against a live, seeded stack (self-skip when unreachable;
+# configured via the NEOIPC_* env vars read by ExternalDhis2Fixture)
 dotnet test --filter "Category=Integration"
 ```
 

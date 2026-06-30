@@ -10,11 +10,11 @@ namespace NeoIPC.Reporting.Resources;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The transformer is opt-in via the <c>?fragmentMode=true</c> query
-/// parameter on the HTML-emitting report endpoints. Default behaviour
-/// (param absent or <c>false</c>) is unchanged and returns the full
-/// Quarto-minimal document; non-app consumers (curl downloads, ad-hoc
-/// scripts) keep working.
+/// Applied to HTML output when requested via the <c>fragmentMode</c> query parameter on the
+/// HTML-emitting report endpoints. The app sends <c>?fragmentMode=true</c> explicitly to inline
+/// the render into its container; the parameter defaults to <c>false</c>, so a consumer that omits
+/// it (curl downloads, ad-hoc scripts) gets the full standalone Quarto-minimal document. PDF and
+/// JSON are unaffected.
 /// </para>
 ///
 /// <para>

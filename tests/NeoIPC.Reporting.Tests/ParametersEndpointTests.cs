@@ -16,11 +16,13 @@ namespace NeoIPC.Reporting.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Skipped on the default <c>dotnet test</c> invocation (filter
-/// <c>Category!=Integration</c> in CI's PR job). Runs on
-/// <c>--filter Category=Integration</c>, which CI invokes only via
-/// <c>workflow_dispatch</c> because it needs Docker available on
-/// the runner.
+/// Tagged <c>Category=Container</c>: it builds and runs the image in
+/// isolation, so it is excluded from the PR unit job (filter
+/// <c>Category!=Integration&amp;Category!=Container</c>) and runs only on
+/// the <c>workflow_dispatch</c> container-smoke job, which has Docker and
+/// builds the image first. This is the repository's own self-contained
+/// gate; it shares no DHIS2 with the workspace-driven
+/// <c>Category=Integration</c> tests (<see cref="RenderingIntegrationTests"/>).
 /// </para>
 /// <para>
 /// The image tag is taken from the <c>NEOIPC_REPORTING_IMAGE_TAG</c>
@@ -30,7 +32,7 @@ namespace NeoIPC.Reporting.Tests;
 /// </para>
 /// </remarks>
 [TestFixture]
-[Category("Integration")]
+[Category("Container")]
 public class ParametersEndpointTests
 {
     static readonly string ImageTag =
