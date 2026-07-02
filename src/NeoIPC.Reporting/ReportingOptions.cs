@@ -74,6 +74,21 @@ public sealed class ReportingOptions
 
     /// <summary>Storage root for admin-uploaded validation-exception files.</summary>
     public string ValidationExceptionsDir { get; set; } = "/home/app/NeoIPC/ValidationExceptions";
+
+    /// <summary>
+    /// When <c>true</c> AND the host environment is Development, a failed
+    /// render's per-render workdir (<c>render_&lt;random&gt;/</c> under
+    /// <see cref="ReportsTempDir"/>) is kept instead of deleted, so its
+    /// <c>.tex</c>, the Quarto/Pandoc/lualatex logs, and the generated figures
+    /// can be inspected locally. Double-gated (this flag AND
+    /// <c>IWebHostEnvironment.IsDevelopment()</c>) on purpose: a kept workdir
+    /// holds the rendered report — i.e. surveillance data — so it must never be
+    /// retained on a production instance. Default <c>false</c>. Kept workdirs
+    /// are not auto-reaped: a Development session with repeated render failures
+    /// accumulates them under <see cref="ReportsTempDir"/> until cleared by hand
+    /// (each retained path is logged when it is kept).
+    /// </summary>
+    public bool KeepFailedRenderWorkdir { get; set; }
 }
 
 /// <summary>
