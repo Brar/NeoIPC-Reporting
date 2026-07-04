@@ -278,7 +278,10 @@ class PartnerReport
             ?? InputValidation.RejectUnsafeStringArray(nameof(apiParameters.UnitCodes), apiParameters.UnitCodes);
         if (unsafeInput is not null) return unsafeInput;
 
-        if (apiParameters.UnitCodes is null or { Length: 0 })
+        // unitCodes names the department to live-fetch in online mode (GET). In
+        // dataFile mode (POST) the department dataset IS the request body, so
+        // unitCodes is irrelevant and the app omits it — require it only online.
+        if (partnerDataBody is null && apiParameters.UnitCodes is null or { Length: 0 })
             return ProblemDetailsHelper.BadRequest(
                 "Missing unitCodes",
                 "The 'unitCodes' query parameter is required.");
