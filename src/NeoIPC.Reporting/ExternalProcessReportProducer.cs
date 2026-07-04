@@ -160,10 +160,12 @@ abstract partial class ExternalProcessReportProducer : IDataProducer
                 try { reportGenerationProcess.WaitForExit(KillGraceMilliseconds); }
                 catch (Exception) { /* already gone / handle invalid — best effort */ }
 
-                // A hung or timed-out render is exactly the case KeepFailedRenderWorkdir
-                // is meant to diagnose, yet it is otherwise the only failure whose
-                // workdir is always deleted. Mark it failed so the dev aid can retain it
-                // (the keep/delete gate — flag + IsDevelopment — lives in DisposeAsync).
+                // A hung or timed-out render is exactly the case the Failed/All
+                // workdir retention (Reporting:RenderWorkdirRetention) is meant to
+                // diagnose, yet it is otherwise the only failure whose workdir is
+                // always deleted. Mark it failed so the dev aid can retain it (the
+                // keep/delete gate — retention setting + IsDevelopment — lives in
+                // DisposeAsync).
                 RenderFailed = true;
                 throw;
             }
