@@ -271,6 +271,14 @@ abstract class QuartoReportProducer : ExternalProcessReportProducer
         else
             startInfo.EnvironmentVariables.Remove("NEOIPCR_DEV_PATH");
 
+        // knitr colourises the R stderr it streams to Quarto red, and the log
+        // drain uses that red (ESC[31m) as the language-independent gate that
+        // identifies R-origin records. Deno gates its colour on !Deno.noColor, so
+        // an inherited NO_COLOR would silently disable the gate and re-bury R
+        // errors at INFO on .Quarto — scrub it from the child env. (Deno reads
+        // only NO_COLOR; no positive force-colour var is needed.)
+        startInfo.EnvironmentVariables.Remove("NO_COLOR");
+
         return startInfo;
 
         IEnumerable<string> GetArguments()
@@ -323,10 +331,11 @@ abstract class QuartoReportProducer : ExternalProcessReportProducer
     }
 
     // A Quarto render also drains the Quarto json-stream into the .Quarto /
-    // .Pandoc channels, so they join the sub-tree the child write-floor derives
-    // from (the base set covers only the root + R channels).
+    // .Pandoc / .LaTeX channels (and recovers R output Quarto captured onto its
+    // own stream to .R.report), so they join the sub-tree the child write-floor
+    // derives from (the base set covers only the root + R channels).
     protected override IReadOnlyList<string> DrainCategorySuffixes { get; } =
-        ["", ".R.report", ".R.common", ".R.neoipcr", ".Quarto", ".Pandoc"];
+        ["", ".R.report", ".R.common", ".R.neoipcr", ".Quarto", ".Pandoc", ".LaTeX"];
 
     protected override async ValueTask DrainDiagnostics(int exitCode, CancellationToken cancellationToken)
     {
