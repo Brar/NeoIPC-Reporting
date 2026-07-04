@@ -28,6 +28,35 @@ public static class OutputNegotiation
             .Select(h => h.Value);
 
     /// <summary>
+    /// True when the request can be satisfied <em>only</em> by a rendered
+    /// (html/pdf) output — a rendered media type is acceptable and the
+    /// locale-independent <c>application/json</c> data output is not. A
+    /// rendering locale is mandatory for the rendered outputs, so a caller who
+    /// offers none (no <c>Accept-Language</c>, no explicit <c>?locale=</c>) and
+    /// accepts only rendered formats cannot be served and is refused (406). When
+    /// <c>application/json</c> is also acceptable this returns false: the data
+    /// output is the raw neoipcr dataset (codes), locale-independent, so the
+    /// request is serviceable without a locale (the JSON producer defaults its
+    /// locale — see <see cref="RScriptReportProducer.DefaultLocale"/>). Returns
+    /// false too when no supported output is acceptable at all — that is an
+    /// unsupported-media-type (415) case decided in producer selection, not a
+    /// locale refusal.
+    /// </summary>
+    public static bool OnlyRenderedOutputsAreAcceptable(
+        ImmutableArray<MediaTypeHeaderValue> acceptHeaders)
+    {
+        var rendered = false;
+        var data = false;
+        foreach (var header in acceptHeaders)
+        {
+            var mediaType = header.MediaType.ToString();
+            if (QuartoReportProducer.IsMediaTypeSupported(mediaType)) rendered = true;
+            if (RScriptReportProducer.IsMediaTypeSupported(mediaType)) data = true;
+        }
+        return rendered && !data;
+    }
+
+    /// <summary>
     /// Walks a sorted Accept-Language list and invokes
     /// <paramref name="factory"/> for the first language that
     /// <paramref name="isSupported"/> accepts. Tries the full tag first

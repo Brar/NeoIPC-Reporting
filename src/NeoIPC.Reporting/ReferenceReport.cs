@@ -89,7 +89,20 @@ class ReferenceReport
         CancellationToken cancellationToken)
     {
         var (sessionId, accept, acceptLang) = ReportRequestBase.ReadHeaders(httpRequest);
-        if (accept.IsDefaultOrEmpty || acceptLang.IsDefaultOrEmpty)
+        if (accept.IsDefaultOrEmpty)
+            return Results.StatusCode(406);
+
+        // A rendering locale is mandatory only for the rendered (html/pdf)
+        // outputs. The application/json data output is the raw neoipcr dataset
+        // (codes), which is locale-independent, so it must not be gated on a
+        // locale here: when the caller accepts application/json (or gives an
+        // explicit ?locale=) let producer selection proceed — the JSON path
+        // defaults its process locale (RScriptReportProducer.DefaultLocale).
+        // Refuse up front only when no locale is available AND the request can
+        // be satisfied only by a rendered output.
+        if (acceptLang.IsDefaultOrEmpty
+            && string.IsNullOrWhiteSpace(locale)
+            && OutputNegotiation.OnlyRenderedOutputsAreAcceptable(accept))
             return Results.StatusCode(406);
 
         // API-boundary YAML safety: every string-typed param flows into a
@@ -353,7 +366,11 @@ class ReferenceReport
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>
                 (new RScriptReferenceReportProducer(mediaType, loc, apiParameters, renderParameters,
                     options, environment, loggerFactory), null),
-            _ => (null, null),
+            // NoMatch: the application/json data output is locale-independent
+            // (raw neoipcr codes), so an unnegotiable locale is not an error
+            // here — default the child's LC_ALL (RScriptReportProducer.DefaultLocale).
+            _ => (new RScriptReferenceReportProducer(mediaType, RScriptReportProducer.DefaultLocale,
+                apiParameters, renderParameters, options, environment, loggerFactory), null),
         };
     }
 

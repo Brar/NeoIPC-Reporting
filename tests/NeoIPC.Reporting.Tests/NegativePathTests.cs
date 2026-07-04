@@ -82,6 +82,37 @@ public class NegativePathTests
     }
 
     [Test]
+    public async Task PartnerReport_JsonOutput_WithoutAcceptLanguage_IsNotRejectedWith406()
+    {
+        // The application/json data output is the raw, locale-independent neoipcr
+        // dataset, so a missing Accept-Language must NOT 406 it (unlike the
+        // rendered pdf/html outputs — see ReferenceReport_MissingAcceptLanguage).
+        // With no unitCodes it now reaches the shape check (400), proving
+        // negotiation let the JSON path through rather than refusing it up front.
+        var req = new HttpRequestMessage(HttpMethod.Get, "/partner-report");
+        req.Headers.Add("Cookie", "JSESSIONID=test-placeholder-session-id");
+        req.Headers.Add("Accept", "application/json");
+        // No Accept-Language header.
+        var response = await _http!.SendAsync(req);
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+    }
+
+    [Test]
+    public async Task ReferenceReport_JsonOutput_WithoutAcceptLanguage_IsNotRejectedWith406()
+    {
+        // Same rule for the reference report's JSON output: a missing
+        // Accept-Language must not 406 the locale-independent data output. A
+        // malformed referenceDataId now surfaces the id-format 400 that the
+        // blanket 406 previously masked.
+        var req = new HttpRequestMessage(HttpMethod.Get, "/reference-report?referenceDataId=not-32-hex");
+        req.Headers.Add("Cookie", "JSESSIONID=test-placeholder-session-id");
+        req.Headers.Add("Accept", "application/json");
+        // No Accept-Language header.
+        var response = await _http!.SendAsync(req);
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+    }
+
+    [Test]
     public async Task ReferenceReport_MalformedReferenceDataId_Returns400()
     {
         var response = await _http!.SendAsync(Get("/reference-report?referenceDataId=not-32-hex"));

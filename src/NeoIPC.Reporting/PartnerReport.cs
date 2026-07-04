@@ -255,8 +255,20 @@ class PartnerReport
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        if (apiParameters.AcceptHeaders.IsDefaultOrEmpty
-            || apiParameters.AcceptLanguageHeaders.IsDefaultOrEmpty)
+        if (apiParameters.AcceptHeaders.IsDefaultOrEmpty)
+            return Results.StatusCode(406);
+
+        // A rendering locale is mandatory only for the rendered (html/pdf)
+        // outputs. The application/json data output is the raw neoipcr dataset
+        // (codes), which is locale-independent, so it must not be gated on a
+        // locale here: when the caller accepts application/json (or gives an
+        // explicit ?locale=) let producer selection proceed — the JSON path
+        // defaults its process locale (RScriptReportProducer.DefaultLocale).
+        // Refuse up front only when no locale is available AND the request can
+        // be satisfied only by a rendered output.
+        if (apiParameters.AcceptLanguageHeaders.IsDefaultOrEmpty
+            && string.IsNullOrWhiteSpace(apiParameters.Locale)
+            && OutputNegotiation.OnlyRenderedOutputsAreAcceptable(apiParameters.AcceptHeaders))
             return Results.StatusCode(406);
 
         // API-boundary YAML safety; see ReferenceReport for the rationale.
@@ -470,7 +482,11 @@ class PartnerReport
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>
                 (new RScriptPartnerReportProducer(mediaType, loc, apiParameters, renderParameters,
                     options, environment, loggerFactory), null),
-            _ => (null, null),
+            // NoMatch: the application/json data output is locale-independent
+            // (raw neoipcr codes), so an unnegotiable locale is not an error
+            // here — default the child's LC_ALL (RScriptReportProducer.DefaultLocale).
+            _ => (new RScriptPartnerReportProducer(mediaType, RScriptReportProducer.DefaultLocale,
+                apiParameters, renderParameters, options, environment, loggerFactory), null),
         };
     }
 
