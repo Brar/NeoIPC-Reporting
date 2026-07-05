@@ -85,6 +85,7 @@ public static class InputValidation
 
     static IResult Reject(string name) =>
         ProblemDetailsHelper.BadRequest(
+            ProblemCodes.InvalidParameterValue,
             "Invalid parameter value",
             $"The '{name}' value contains a control character " +
             "(newline, carriage return, or other char outside the " +

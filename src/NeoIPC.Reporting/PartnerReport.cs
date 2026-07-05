@@ -95,6 +95,7 @@ class PartnerReport
     {
         if (!ConfidenceIntervalConverter.TryParse(confidenceIntervals, out var confidenceIntervalMode))
             return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.InvalidConfidenceIntervals,
                 "Invalid confidenceIntervals",
                 "The 'confidenceIntervals' parameter must be one of: all, rate, none.");
 
@@ -162,12 +163,14 @@ class PartnerReport
     {
         if (httpRequest.ContentLength is null or 0)
             return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.MissingPartnerDataBody,
                 "Missing partnerData body",
                 "POST /partner-report requires the partner-data JSON in the request body. " +
                 "Use GET for online mode (no body).");
 
         if (!ConfidenceIntervalConverter.TryParse(confidenceIntervals, out var confidenceIntervalMode))
             return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.InvalidConfidenceIntervals,
                 "Invalid confidenceIntervals",
                 "The 'confidenceIntervals' parameter must be one of: all, rate, none.");
 
@@ -293,6 +296,7 @@ class PartnerReport
         // unitCodes is irrelevant and the app omits it — require it only online.
         if (partnerDataBody is null && apiParameters.UnitCodes is null or { Length: 0 })
             return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.MissingUnitCodes,
                 "Missing unitCodes",
                 "The 'unitCodes' query parameter is required.");
 
@@ -307,10 +311,12 @@ class PartnerReport
         {
             if (!FileStorage.IsValidId(apiParameters.ReferenceDataFile))
                 return ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.InvalidReferenceDataFile,
                     "Invalid referenceDataFile",
                     "The 'referenceDataFile' must be 32 hex characters.");
             if (!referenceDataStorage.Exists(apiParameters.ReferenceDataFile))
                 return ProblemDetailsHelper.NotFound(
+                    ProblemCodes.ReferenceDatasetNotFound,
                     "Reference dataset not found",
                     $"No reference dataset is stored under id '{apiParameters.ReferenceDataFile}'.");
         }
@@ -466,6 +472,7 @@ class PartnerReport
         {
             { Status: LocaleResolver.Status.ExplicitUnsupported } =>
                 (null, ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.UnsupportedLocale,
                     "Unsupported locale",
                     $"The 'locale' parameter '{apiParameters.Locale}' is not supported by this report.")),
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>
@@ -490,6 +497,7 @@ class PartnerReport
         {
             { Status: LocaleResolver.Status.ExplicitUnsupported } =>
                 (null, ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.UnsupportedLocale,
                     "Unsupported locale",
                     $"The 'locale' parameter '{apiParameters.Locale}' is not supported by this report.")),
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>

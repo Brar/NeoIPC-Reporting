@@ -118,6 +118,7 @@ class ReferenceReport
 
         if (!ConfidenceIntervalConverter.TryParse(confidenceIntervals, out var confidenceIntervalMode))
             return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.InvalidConfidenceIntervals,
                 "Invalid confidenceIntervals",
                 "The 'confidenceIntervals' parameter must be one of: all, rate, none.");
 
@@ -132,16 +133,19 @@ class ReferenceReport
                 countryFilter);
             if (rejected.Count > 0)
                 return ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.MixedModeNotAllowed,
                     "Mixed mode is not allowed",
                     "When 'referenceDataId' is set, the dataset is fixed and the live-fetch filter " +
                     $"params must not be specified: {string.Join(", ", rejected)}.");
 
             if (!FileStorage.IsValidId(referenceDataId!))
                 return ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.InvalidReferenceDataId,
                     "Invalid referenceDataId",
                     "The 'referenceDataId' must be 32 hex characters.");
             if (!referenceDataStorage.Exists(referenceDataId!))
                 return ProblemDetailsHelper.NotFound(
+                    ProblemCodes.ReferenceDatasetNotFound,
                     "Reference dataset not found",
                     $"No reference dataset is stored under id '{referenceDataId}'.");
 
@@ -342,6 +346,7 @@ class ReferenceReport
         {
             { Status: LocaleResolver.Status.ExplicitUnsupported } =>
                 (null, ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.UnsupportedLocale,
                     "Unsupported locale",
                     $"The 'locale' parameter '{apiParameters.Locale}' is not supported by this report.")),
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>
@@ -366,6 +371,7 @@ class ReferenceReport
         {
             { Status: LocaleResolver.Status.ExplicitUnsupported } =>
                 (null, ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.UnsupportedLocale,
                     "Unsupported locale",
                     $"The 'locale' parameter '{apiParameters.Locale}' is not supported by this report.")),
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>

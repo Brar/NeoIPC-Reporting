@@ -28,12 +28,14 @@ public static class ValidationExceptionEndpoints
     public static IResult AdminGet(ValidationExceptionStorage storage)
     {
         if (!storage.Exists())
-            return Results.Problem(statusCode: StatusCodes.Status404NotFound,
-                title: "Not found",
-                detail: "No validation-exception file has been uploaded.");
+            return ProblemDetailsHelper.NotFound(
+                ProblemCodes.ResourceNotFound, "Not found",
+                "No validation-exception file has been uploaded.");
         var sidecar = ReadSidecar(storage);
         if (sidecar is null)
-            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found");
+            return ProblemDetailsHelper.NotFound(
+                ProblemCodes.ResourceNotFound, "Not found",
+                "No validation-exception file has been uploaded.");
         return Results.Ok(AdminValidationExceptionMetadata.From(ValidationExceptionStorage.SingletonId, sidecar));
     }
 
@@ -77,7 +79,9 @@ public static class ValidationExceptionEndpoints
     public static IResult AdminDelete(ValidationExceptionStorage storage)
     {
         if (!storage.Exists())
-            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found");
+            return ProblemDetailsHelper.NotFound(
+                ProblemCodes.ResourceNotFound, "Not found",
+                "No validation-exception file has been uploaded.");
         storage.Delete();
         return Results.NoContent();
     }

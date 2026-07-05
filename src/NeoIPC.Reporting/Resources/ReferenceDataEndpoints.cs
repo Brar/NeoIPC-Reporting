@@ -48,9 +48,12 @@ public static class ReferenceDataEndpoints
     public static IResult AdminDownload(string id, ReferenceDataStorage storage)
     {
         if (!FileStorage.IsValidId(id))
-            return ProblemDetailsHelper.BadRequest("Invalid id", "The id must be 32 hex characters.");
+            return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.InvalidId, "Invalid id", "The id must be 32 hex characters.");
         if (!storage.Exists(id))
-            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found");
+            return ProblemDetailsHelper.NotFound(
+                ProblemCodes.ResourceNotFound, "Not found",
+                "The requested reference dataset does not exist.");
         var sidecar = ReadSidecar(storage, id);
         var contentType = sidecar?.ContentType ?? "application/json";
         return Results.File(storage.DataPath(id), contentType: contentType);
@@ -71,10 +74,9 @@ public static class ReferenceDataEndpoints
         CancellationToken ct)
     {
         if (!IsJsonContentType(request.ContentType))
-            return Results.Problem(
-                statusCode: StatusCodes.Status415UnsupportedMediaType,
-                title: "Unsupported media type",
-                detail: "Reference-data upload requires Content-Type: application/json.");
+            return ProblemDetailsHelper.UnsupportedMediaType(
+                ProblemCodes.UnsupportedMediaType,
+                "Reference-data upload requires Content-Type: application/json.");
 
         var stagedPath = await storage.StageAsync(request.Body, ct);
         try
@@ -82,6 +84,7 @@ public static class ReferenceDataEndpoints
             var extraction = await extractor.ExtractAsync(stagedPath, ct);
             if (!extraction.Success || extraction.Metadata is null)
                 return ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.InvalidReferenceData,
                     "Invalid reference data",
                     extraction.ErrorMessage ?? "The uploaded file is not a valid reference dataset.");
 
@@ -122,9 +125,12 @@ public static class ReferenceDataEndpoints
     public static IResult AdminDelete(string id, ReferenceDataStorage storage)
     {
         if (!FileStorage.IsValidId(id))
-            return ProblemDetailsHelper.BadRequest("Invalid id", "The id must be 32 hex characters.");
+            return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.InvalidId, "Invalid id", "The id must be 32 hex characters.");
         if (!storage.Exists(id))
-            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found");
+            return ProblemDetailsHelper.NotFound(
+                ProblemCodes.ResourceNotFound, "Not found",
+                "The requested reference dataset does not exist.");
         storage.Delete(id);
         return Results.NoContent();
     }

@@ -32,7 +32,8 @@ public static class NeoIpcAuthorization
         var result = await authorizationService.AuthorizeAsync(user, policy);
         return result.Succeeded
             ? null
-            : ProblemDetailsHelper.Forbidden("Forbidden", forbiddenDetail);
+            : ProblemDetailsHelper.Forbidden(
+                ProblemCodes.InsufficientAuthority, "Forbidden", forbiddenDetail);
     }
 }
 
