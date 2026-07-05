@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace NeoIPC.Reporting.Resources;
@@ -60,10 +61,12 @@ public static class ReferenceDataEndpoints
     }
 
     /// <summary>
-    /// Admin upload — stages the body, runs the metadata extractor, builds
-    /// the sidecar from the extracted filter set, and commits. Returns
-    /// 415 when the Content-Type isn't <c>application/json</c>; 400 when
-    /// the body fails extraction (likely not a valid reference dataset).
+    /// Admin upload — stages the body, runs the metadata extractor, rejects a
+    /// byte-identical re-upload, builds the sidecar from the extracted filter
+    /// set, and commits. Returns 415 when the Content-Type isn't
+    /// <c>application/json</c>; 400 when the body fails extraction (likely not a
+    /// valid reference dataset); 409 when its content is byte-for-byte identical
+    /// to an already-stored dataset.
     /// </summary>
     public static async Task<IResult> AdminUpload(
         string? displayName,
@@ -87,6 +90,24 @@ public static class ReferenceDataEndpoints
                     ProblemCodes.InvalidReferenceData,
                     "Invalid reference data",
                     extraction.ErrorMessage ?? "The uploaded file is not a valid reference dataset.");
+
+            // Reject a byte-identical re-upload: hash the staged bytes and compare
+            // against every stored dataset, so the same benchmark can't pile up
+            // under different display names.
+            var contentHash = await ComputeContentHashAsync(stagedPath, ct);
+            foreach (var existingId in storage.EnumerateIds())
+            {
+                var existingPath = storage.DataPath(existingId);
+                if (!File.Exists(existingPath)) continue;
+                if (await ComputeContentHashAsync(existingPath, ct) != contentHash) continue;
+                var existing = ReadSidecar(storage, existingId);
+                storage.Discard(stagedPath);
+                return ProblemDetailsHelper.Conflict(
+                    ProblemCodes.DuplicateReferenceData,
+                    "Duplicate reference dataset",
+                    $"An identical reference dataset already exists as " +
+                    $"'{existing?.DisplayName ?? existingId}'.");
+            }
 
             var id = FileStorage.GenerateId();
             var fileInfo = new FileInfo(stagedPath);
@@ -146,6 +167,13 @@ public static class ReferenceDataEndpoints
         {
             return null;
         }
+    }
+
+    /// <summary>Uppercase-hex SHA-256 of a file's raw bytes, for duplicate detection.</summary>
+    static async Task<string> ComputeContentHashAsync(string path, CancellationToken ct)
+    {
+        await using var stream = File.OpenRead(path);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct));
     }
 
     static bool IsJsonContentType(string? contentType) =>

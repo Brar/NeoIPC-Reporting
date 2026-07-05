@@ -52,6 +52,20 @@ public class ProblemDetailsHelperTests
     }
 
     [Test]
+    public void Conflict_CarriesCodeAnd409()
+    {
+        var problem = Problem(ProblemDetailsHelper.Conflict(
+            ProblemCodes.DuplicateReferenceData, "Duplicate reference dataset", "d"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(problem.StatusCode, Is.EqualTo(409));
+            Assert.That(problem.ProblemDetails.Extensions["code"],
+                Is.EqualTo(ProblemCodes.DuplicateReferenceData));
+        });
+    }
+
+    [Test]
     public void Forbidden_CarriesCodeAnd403()
     {
         var problem = Problem(ProblemDetailsHelper.Forbidden(

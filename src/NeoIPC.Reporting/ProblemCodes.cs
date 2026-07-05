@@ -29,6 +29,7 @@ public static class ProblemCodes
     // Admin resources (reference-data, validation-exceptions)
     public const string InvalidId = "invalid-id";
     public const string InvalidReferenceData = "invalid-reference-data";
+    public const string DuplicateReferenceData = "duplicate-reference-data";
     public const string ResourceNotFound = "resource-not-found";
     public const string UnsupportedMediaType = "unsupported-media-type";
 }

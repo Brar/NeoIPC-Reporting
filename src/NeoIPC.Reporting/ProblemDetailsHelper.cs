@@ -21,6 +21,9 @@ public static class ProblemDetailsHelper
     public static IResult NotFound(string code, string title, string detail) =>
         Problem(code, title, detail, StatusCodes.Status404NotFound);
 
+    public static IResult Conflict(string code, string title, string detail) =>
+        Problem(code, title, detail, StatusCodes.Status409Conflict);
+
     public static IResult UnsupportedMediaType(string code, string detail) =>
         Problem(code, "Unsupported media type", detail, StatusCodes.Status415UnsupportedMediaType);
 
