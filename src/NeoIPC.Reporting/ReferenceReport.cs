@@ -54,7 +54,7 @@ class ReferenceReport
         [FromQuery] bool? testUnitFilter,
         [FromQuery] bool? defaultPatientFilter,
         [FromQuery] ushort? sparseDataThreshold,
-        [FromQuery] ConfidenceIntervalMode? confidenceIntervals,
+        [FromQuery] string? confidenceIntervals,
         [FromQuery] bool? includeIntroductionTexts,
         [FromQuery] bool? includeMethodsTexts,
         [FromQuery] bool? includeBirthWeightFigure,
@@ -116,6 +116,11 @@ class ReferenceReport
             ?? InputValidation.RejectUnsafeStringArray(nameof(hospitalFilter), hospitalFilter);
         if (unsafeInput is not null) return unsafeInput;
 
+        if (!ConfidenceIntervalConverter.TryParse(confidenceIntervals, out var confidenceIntervalMode))
+            return ProblemDetailsHelper.BadRequest(
+                "Invalid confidenceIntervals",
+                "The 'confidenceIntervals' parameter must be one of: all, rate, none.");
+
         var hasStoredDataMode = !string.IsNullOrEmpty(referenceDataId);
 
         if (hasStoredDataMode)
@@ -173,7 +178,7 @@ class ReferenceReport
             TestUnitFilter = testUnitFilter,
             DefaultPatientFilter = defaultPatientFilter,
             SparseDataThreshold = sparseDataThreshold,
-            ConfidenceIntervals = confidenceIntervals,
+            ConfidenceIntervals = confidenceIntervalMode,
             IncludeIntroductionTexts = includeIntroductionTexts,
             IncludeMethodsTexts = includeMethodsTexts,
             IncludeBirthWeightFigure = includeBirthWeightFigure,

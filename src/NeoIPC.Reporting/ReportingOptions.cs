@@ -76,6 +76,22 @@ public sealed class ReportingOptions
     public string ValidationExceptionsDir { get; set; } = "/home/app/NeoIPC/ValidationExceptions";
 
     /// <summary>
+    /// Language subtags whose report localization is complete enough to
+    /// offer and render. The warmup service registers a report's base
+    /// English master and any <c>&lt;Report&gt;.&lt;lang&gt;.qmd</c>
+    /// translation only when the language appears here — so a committed but
+    /// incompletely-localized translation (missing its
+    /// <c>_quarto-&lt;lang&gt;.yml</c>, sparse content) is neither advertised
+    /// in the app's language picker nor resolved to via <c>Accept-Language</c>,
+    /// both of which would otherwise fail the render. Defaults to English
+    /// only; add a language once its translation is render-ready. Keep
+    /// <c>"en"</c> (the source) listed unless deliberately disabling the
+    /// report entirely — dropping it registers no languages and makes every
+    /// report unresolvable.
+    /// </summary>
+    public string[] RenderReadyLanguages { get; set; } = ["en"];
+
+    /// <summary>
     /// Which render workdirs (<c>render_&lt;random&gt;/</c> under
     /// <see cref="ReportsTempDir"/>) are kept for local inspection instead of
     /// deleted on dispose — none, failed renders only, or every render. A kept

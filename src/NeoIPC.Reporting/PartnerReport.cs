@@ -58,7 +58,7 @@ class PartnerReport
         [FromQuery] bool? includeNonCorePatients,
         [FromQuery] bool? includeTestData,
         [FromQuery] ushort? sparseDataThreshold,
-        [FromQuery] ConfidenceIntervalMode? confidenceIntervals,
+        [FromQuery] string? confidenceIntervals,
         [FromQuery] bool? includeIntroductionTexts,
         [FromQuery] bool? includeMethodsTexts,
         [FromQuery] bool? includeOutlierInterpretation,
@@ -93,13 +93,18 @@ class PartnerReport
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
+        if (!ConfidenceIntervalConverter.TryParse(confidenceIntervals, out var confidenceIntervalMode))
+            return ProblemDetailsHelper.BadRequest(
+                "Invalid confidenceIntervals",
+                "The 'confidenceIntervals' parameter must be one of: all, rate, none.");
+
         return await Handle(
             apiParameters: BuildApiParameters(
                 referenceDataFile, locale,
                 unitCodes, reportingPeriodFrom, reportingPeriodTo,
                 birthWeightFrom, birthWeightTo, gestationalAgeFrom, gestationalAgeTo,
                 includeNonCorePatients, includeTestData, sparseDataThreshold,
-                confidenceIntervals, includeIntroductionTexts, includeMethodsTexts,
+                confidenceIntervalMode, includeIntroductionTexts, includeMethodsTexts,
                 includeOutlierInterpretation,
                 includeBirthWeightFigure, includeGestationalAgeFigure,
                 includeIncidenceDensityTable, includeDeviceAssociatedIncidenceDensityTable,
@@ -120,7 +125,7 @@ class PartnerReport
         [FromQuery] string? locale,
         [FromQuery] string[] unitCodes,
         [FromQuery] ushort? sparseDataThreshold,
-        [FromQuery] ConfidenceIntervalMode? confidenceIntervals,
+        [FromQuery] string? confidenceIntervals,
         [FromQuery] bool? includeIntroductionTexts,
         [FromQuery] bool? includeMethodsTexts,
         [FromQuery] bool? includeOutlierInterpretation,
@@ -161,6 +166,11 @@ class PartnerReport
                 "POST /partner-report requires the partner-data JSON in the request body. " +
                 "Use GET for online mode (no body).");
 
+        if (!ConfidenceIntervalConverter.TryParse(confidenceIntervals, out var confidenceIntervalMode))
+            return ProblemDetailsHelper.BadRequest(
+                "Invalid confidenceIntervals",
+                "The 'confidenceIntervals' parameter must be one of: all, rate, none.");
+
         return await Handle(
             apiParameters: BuildApiParameters(
                 referenceDataFile, locale,
@@ -168,7 +178,7 @@ class PartnerReport
                 birthWeightFrom: null, birthWeightTo: null,
                 gestationalAgeFrom: null, gestationalAgeTo: null,
                 includeNonCorePatients: null, includeTestData: null,
-                sparseDataThreshold, confidenceIntervals,
+                sparseDataThreshold, confidenceIntervalMode,
                 includeIntroductionTexts, includeMethodsTexts, includeOutlierInterpretation,
                 includeBirthWeightFigure, includeGestationalAgeFigure,
                 includeIncidenceDensityTable, includeDeviceAssociatedIncidenceDensityTable,
