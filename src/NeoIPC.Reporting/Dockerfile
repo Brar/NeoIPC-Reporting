@@ -458,6 +458,16 @@ ENV PATH="/home/app/.TinyTeX/bin/x86_64-linux:$PATH"
 # defence-in-depth complement to the per-render symlink-forest model.
 RUN chmod -R a-w /toolkit
 
+# Pre-create the reporting file-storage roots owned by the app user so a named
+# volume mounted here (compose persistence for reference datasets + the
+# validation-exception file) is seeded with app ownership. Docker copies an
+# image directory's ownership into a fresh empty volume on first mount; without
+# these dirs existing in the image the volume mountpoint is created root-owned
+# and the non-root app (USER $APP_UID) gets EACCES on every upload. Paths match
+# ReportingOptions ReferenceDataDir / ValidationExceptionsDir.
+RUN mkdir -p /home/app/NeoIPC/ReferenceData /home/app/NeoIPC/ValidationExceptions && \
+    chown -R $APP_UID /home/app/NeoIPC
+
 USER $APP_UID
 WORKDIR /app
 EXPOSE 8080

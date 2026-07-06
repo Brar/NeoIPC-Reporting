@@ -379,16 +379,22 @@ abstract class QuartoReportProducer : ExternalProcessReportProducer
     {
         if (_renderRoot.Exists)
         {
-            // Double-gated dev aid: keep a failed render's workdir (its .tex,
-            // the Quarto/Pandoc/lualatex logs, and generated figures) for local
-            // inspection. Gated on both the config flag AND Development because
-            // the workdir holds the rendered report — surveillance data — and so
-            // must never be retained on a production instance.
-            if (RenderFailed && _options.KeepFailedRenderWorkdir && Environment.IsDevelopment())
+            // Double-gated dev aid: keep a render's workdir (its .tex, the
+            // Quarto/Pandoc/lualatex logs, and generated figures) for local
+            // inspection. Gated on both the retention setting AND Development
+            // because the workdir holds the rendered report — surveillance data —
+            // and so must never be retained on a production instance.
+            var keep = Environment.IsDevelopment() && _options.RenderWorkdirRetention switch
+            {
+                RenderWorkdirRetention.All => true,
+                RenderWorkdirRetention.Failed => RenderFailed,
+                _ => false,
+            };
+            if (keep)
                 Logger.LogWarning(
-                    "Render failed; keeping its workdir for inspection (Reporting:KeepFailedRenderWorkdir + Development). "
+                    "Keeping render workdir for inspection (Reporting:RenderWorkdirRetention={Retention} + Development, RenderFailed={RenderFailed}). "
                     + "It holds the rendered report — delete it when done: {RenderRoot}",
-                    _renderRoot.FullName);
+                    _options.RenderWorkdirRetention, RenderFailed, _renderRoot.FullName);
             else
                 _renderRoot.Delete(recursive: true);
         }

@@ -99,4 +99,26 @@ abstract class RScriptReportProducer : ExternalProcessReportProducer
             .Select(s => new KeyValuePair<string, MediaTypeHeaderValue>(s,
                 new MediaTypeHeaderValue(s)))
             .ToFrozenDictionary(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Whether the data (JSON) path can serve a caller who accepts
+    /// <paramref name="mediaType"/> — an exact match or a wildcard that the
+    /// supported <c>application/json</c> is a subset of (<c>application/*</c>,
+    /// <c>*/*</c>). Mirrors <see cref="QuartoReportProducer.IsMediaTypeSupported"/>.
+    /// </summary>
+    public static bool IsMediaTypeSupported(string mediaType)
+        => SupportedMediaTypeHeaderValues.ContainsKey(mediaType) ||
+           SupportedMediaTypeHeaderValues.Values.Any(v =>
+               v.IsSubsetOf(new MediaTypeHeaderValue(mediaType)));
+
+    /// <summary>
+    /// The locale the data (JSON) path falls back to when none can be
+    /// negotiated (no <c>Accept-Language</c>, no explicit <c>?locale=</c>). The
+    /// data output is locale-independent (raw neoipcr codes), but the child R
+    /// process still needs a valid, container-generated <c>LC_ALL</c>, so the
+    /// path defaults to <c>en</c> (<c>en_GB.UTF-8</c>) rather than refusing the
+    /// request. <c>en_GB</c> is one of the locales the container generates (see
+    /// <see cref="LocaleResolver"/>).
+    /// </summary>
+    public static readonly ResolvedLocale DefaultLocale = LocaleResolver.Parse("en");
 }

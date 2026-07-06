@@ -54,7 +54,7 @@ class ReferenceReport
         [FromQuery] bool? testUnitFilter,
         [FromQuery] bool? defaultPatientFilter,
         [FromQuery] ushort? sparseDataThreshold,
-        [FromQuery] ConfidenceIntervalMode? confidenceIntervals,
+        [FromQuery] string? confidenceIntervals,
         [FromQuery] bool? includeIntroductionTexts,
         [FromQuery] bool? includeMethodsTexts,
         [FromQuery] bool? includeBirthWeightFigure,
@@ -89,7 +89,20 @@ class ReferenceReport
         CancellationToken cancellationToken)
     {
         var (sessionId, accept, acceptLang) = ReportRequestBase.ReadHeaders(httpRequest);
-        if (accept.IsDefaultOrEmpty || acceptLang.IsDefaultOrEmpty)
+        if (accept.IsDefaultOrEmpty)
+            return Results.StatusCode(406);
+
+        // A rendering locale is mandatory only for the rendered (html/pdf)
+        // outputs. The application/json data output is the raw neoipcr dataset
+        // (codes), which is locale-independent, so it must not be gated on a
+        // locale here: when the caller accepts application/json (or gives an
+        // explicit ?locale=) let producer selection proceed — the JSON path
+        // defaults its process locale (RScriptReportProducer.DefaultLocale).
+        // Refuse up front only when no locale is available AND the request can
+        // be satisfied only by a rendered output.
+        if (acceptLang.IsDefaultOrEmpty
+            && string.IsNullOrWhiteSpace(locale)
+            && OutputNegotiation.OnlyRenderedOutputsAreAcceptable(accept))
             return Results.StatusCode(406);
 
         // API-boundary YAML safety: every string-typed param flows into a
@@ -103,6 +116,12 @@ class ReferenceReport
             ?? InputValidation.RejectUnsafeStringArray(nameof(hospitalFilter), hospitalFilter);
         if (unsafeInput is not null) return unsafeInput;
 
+        if (!ConfidenceIntervalConverter.TryParse(confidenceIntervals, out var confidenceIntervalMode))
+            return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.InvalidConfidenceIntervals,
+                "Invalid confidenceIntervals",
+                "The 'confidenceIntervals' parameter must be one of: all, rate, none.");
+
         var hasStoredDataMode = !string.IsNullOrEmpty(referenceDataId);
 
         if (hasStoredDataMode)
@@ -114,16 +133,19 @@ class ReferenceReport
                 countryFilter);
             if (rejected.Count > 0)
                 return ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.MixedModeNotAllowed,
                     "Mixed mode is not allowed",
                     "When 'referenceDataId' is set, the dataset is fixed and the live-fetch filter " +
                     $"params must not be specified: {string.Join(", ", rejected)}.");
 
             if (!FileStorage.IsValidId(referenceDataId!))
                 return ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.InvalidReferenceDataId,
                     "Invalid referenceDataId",
                     "The 'referenceDataId' must be 32 hex characters.");
             if (!referenceDataStorage.Exists(referenceDataId!))
                 return ProblemDetailsHelper.NotFound(
+                    ProblemCodes.ReferenceDatasetNotFound,
                     "Reference dataset not found",
                     $"No reference dataset is stored under id '{referenceDataId}'.");
 
@@ -160,7 +182,7 @@ class ReferenceReport
             TestUnitFilter = testUnitFilter,
             DefaultPatientFilter = defaultPatientFilter,
             SparseDataThreshold = sparseDataThreshold,
-            ConfidenceIntervals = confidenceIntervals,
+            ConfidenceIntervals = confidenceIntervalMode,
             IncludeIntroductionTexts = includeIntroductionTexts,
             IncludeMethodsTexts = includeMethodsTexts,
             IncludeBirthWeightFigure = includeBirthWeightFigure,
@@ -324,6 +346,7 @@ class ReferenceReport
         {
             { Status: LocaleResolver.Status.ExplicitUnsupported } =>
                 (null, ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.UnsupportedLocale,
                     "Unsupported locale",
                     $"The 'locale' parameter '{apiParameters.Locale}' is not supported by this report.")),
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>
@@ -348,12 +371,17 @@ class ReferenceReport
         {
             { Status: LocaleResolver.Status.ExplicitUnsupported } =>
                 (null, ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.UnsupportedLocale,
                     "Unsupported locale",
                     $"The 'locale' parameter '{apiParameters.Locale}' is not supported by this report.")),
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>
                 (new RScriptReferenceReportProducer(mediaType, loc, apiParameters, renderParameters,
                     options, environment, loggerFactory), null),
-            _ => (null, null),
+            // NoMatch: the application/json data output is locale-independent
+            // (raw neoipcr codes), so an unnegotiable locale is not an error
+            // here — default the child's LC_ALL (RScriptReportProducer.DefaultLocale).
+            _ => (new RScriptReferenceReportProducer(mediaType, RScriptReportProducer.DefaultLocale,
+                apiParameters, renderParameters, options, environment, loggerFactory), null),
         };
     }
 

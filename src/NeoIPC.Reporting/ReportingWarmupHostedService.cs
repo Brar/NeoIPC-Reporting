@@ -70,11 +70,20 @@ public sealed class ReportingWarmupHostedService : IHostedService
     {
         var reportName = reportDir.Name;
         var baseQmd = $"{reportName}.qmd";
+        // Render-ready allowlist: only advertise a language whose localization
+        // is declared complete. A committed but incompletely-localized
+        // `<Report>.<lang>.qmd` (missing its `_quarto-<lang>.yml`, sparse
+        // content) would otherwise be offered in the app's picker and resolved
+        // to via Accept-Language, then fail to render. English (the source
+        // master) is gated on the same list so it stays the single source of
+        // truth; the default list is `["en"]`.
+        var renderReady = _options.Value.RenderReadyLanguages;
         // Case-insensitive to match ReportLanguageRegistry and LocaleResolver
         // (resolved language subtags are lower-cased; qmd-derived keys may not be).
         var languages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        if (File.Exists(Path.Join(reportDir.FullName, baseQmd)))
+        if (renderReady.Contains("en", StringComparer.OrdinalIgnoreCase)
+            && File.Exists(Path.Join(reportDir.FullName, baseQmd)))
         {
             languages["en"] = baseQmd;
             languages["en-GB"] = baseQmd;
@@ -89,6 +98,9 @@ public sealed class ReportingWarmupHostedService : IHostedService
             if (!name.EndsWith(".qmd", StringComparison.Ordinal)) continue;
             var locale = name[prefix.Length..^4];
             if (locale.Length == 0) continue;
+            var language = locale.Split('-', '_')[0];
+            if (!renderReady.Contains(language, StringComparer.OrdinalIgnoreCase))
+                continue;
             languages[locale] = name;
         }
 

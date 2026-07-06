@@ -10,7 +10,7 @@ namespace NeoIPC.Reporting.Resources;
 /// Reads the metadata block out of an admin-uploaded reference dataset
 /// by shelling out to <c>scripts/extract-reference-data-metadata.R</c>,
 /// which uses <c>jsonlite::unserializeJSON</c> to unwrap R's
-/// <c>serializeJSON</c> format and <c>neoipcr::write_json</c> to emit a
+/// <c>serializeJSON</c> format and <c>jsonlite::toJSON</c> to emit a
 /// plain-JSON projection that .NET can parse with
 /// <see cref="JsonSerializer"/>.
 /// </summary>
@@ -21,10 +21,8 @@ namespace NeoIPC.Reporting.Resources;
 /// and only round-trips back through <c>jsonlite::unserializeJSON</c>.
 /// Reimplementing that decoder in C# would be substantial work and
 /// would couple the .NET service to an R-internal contract that can
-/// shift; routing through neoipcr keeps the format coupling on one
-/// side. See <c>tasks/neoipcr-plain-json-serialization.md</c> for the
-/// follow-up that will eventually let datasets travel as plain JSON
-/// directly, eliminating this extraction step.
+/// shift; keeping the decode in R (jsonlite) keeps the format coupling
+/// on one side.
 /// </remarks>
 public sealed class ReferenceDataMetadataExtractor
 {
@@ -75,9 +73,6 @@ public sealed class ReferenceDataMetadataExtractor
         psi.ArgumentList.Add(datasetPath);
         psi.ArgumentList.Add("--out");
         psi.ArgumentList.Add(outPath);
-
-        if (_options.Value.BuildMode == BuildMode.Workspace)
-            psi.Environment["NEOIPCR_DEV_PATH"] = "/neoipcr";
 
         try
         {

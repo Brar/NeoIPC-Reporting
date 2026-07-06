@@ -12,10 +12,13 @@
 #     --in <serialized-dataset.json> \
 #     --out <metadata.json>
 
-suppressPackageStartupMessages({
-  library(jsonlite)
-  library(neoipcr)
-})
+# Only jsonlite is needed: the dataset is decoded with jsonlite::unserializeJSON
+# and its metadata block re-emitted as plain JSON below. neoipcr is deliberately
+# NOT loaded — a plain library(neoipcr) fails in the workspace/dev container
+# (where neoipcr is load_all-ed, not installed), and jsonlite serialises the
+# metadata on its own (the dataset_options' neoipcr_dhis2_dsopt class inherits
+# "list", so it needs no bespoke asJSON method).
+suppressPackageStartupMessages(library(jsonlite))
 
 args <- commandArgs(trailingOnly = TRUE)
 get_arg <- function(flag) {
@@ -46,4 +49,29 @@ if (!is.list(dataset) || is.null(dataset$metadata)) {
     call. = FALSE)
 }
 
-neoipcr::write_json(dataset$metadata, file = out_path, pretty = FALSE)
+metadata <- dataset$metadata
+
+# country_filter must stay a JSON array even for a single country: auto_unbox
+# collapses a length-1 vector to a scalar string, which the .NET string[] binder
+# rejects. I() marks it as-is so auto_unbox leaves it an array (length 0 and >1
+# already serialise as arrays).
+if (!is.null(metadata$dataset_options$country_filter)) {
+  metadata$dataset_options$country_filter <-
+    I(as.character(metadata$dataset_options$country_filter))
+}
+
+# calculated is a UTC instant; emit an explicit Z so .NET binds it unambiguously.
+# jsonlite's POSIXt = "ISO8601" is offset-less, so .NET would otherwise reinterpret
+# it in the container's local time zone.
+if (!is.null(metadata$calculated)) {
+  metadata$calculated <- format(metadata$calculated, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+}
+
+# No force: the dataset_options' neoipcr_dhis2_dsopt class inherits "list" (see
+# the header note), so jsonlite serialises it as its underlying list without a
+# bespoke asJSON method. The remaining options mirror the shape the .NET
+# extractor expects: scalars unboxed, dates ISO 8601.
+writeLines(
+  jsonlite::toJSON(metadata, auto_unbox = TRUE,
+    null = "null", na = "null", Date = "ISO8601", POSIXt = "ISO8601"),
+  out_path)

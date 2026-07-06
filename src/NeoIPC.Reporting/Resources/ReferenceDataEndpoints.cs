@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace NeoIPC.Reporting.Resources;
@@ -48,19 +49,24 @@ public static class ReferenceDataEndpoints
     public static IResult AdminDownload(string id, ReferenceDataStorage storage)
     {
         if (!FileStorage.IsValidId(id))
-            return ProblemDetailsHelper.BadRequest("Invalid id", "The id must be 32 hex characters.");
+            return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.InvalidId, "Invalid id", "The id must be 32 hex characters.");
         if (!storage.Exists(id))
-            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found");
+            return ProblemDetailsHelper.NotFound(
+                ProblemCodes.ResourceNotFound, "Not found",
+                "The requested reference dataset does not exist.");
         var sidecar = ReadSidecar(storage, id);
         var contentType = sidecar?.ContentType ?? "application/json";
         return Results.File(storage.DataPath(id), contentType: contentType);
     }
 
     /// <summary>
-    /// Admin upload — stages the body, runs the metadata extractor, builds
-    /// the sidecar from the extracted filter set, and commits. Returns
-    /// 415 when the Content-Type isn't <c>application/json</c>; 400 when
-    /// the body fails extraction (likely not a valid reference dataset).
+    /// Admin upload — stages the body, runs the metadata extractor, rejects a
+    /// byte-identical re-upload, builds the sidecar from the extracted filter
+    /// set, and commits. Returns 415 when the Content-Type isn't
+    /// <c>application/json</c>; 400 when the body fails extraction (likely not a
+    /// valid reference dataset); 409 when its content is byte-for-byte identical
+    /// to an already-stored dataset.
     /// </summary>
     public static async Task<IResult> AdminUpload(
         string? displayName,
@@ -71,19 +77,37 @@ public static class ReferenceDataEndpoints
         CancellationToken ct)
     {
         if (!IsJsonContentType(request.ContentType))
-            return Results.Problem(
-                statusCode: StatusCodes.Status415UnsupportedMediaType,
-                title: "Unsupported media type",
-                detail: "Reference-data upload requires Content-Type: application/json.");
+            return ProblemDetailsHelper.UnsupportedMediaType(
+                ProblemCodes.UnsupportedMediaType,
+                "Reference-data upload requires Content-Type: application/json.");
 
         var stagedPath = await storage.StageAsync(request.Body, ct);
+        var committed = false;
         try
         {
             var extraction = await extractor.ExtractAsync(stagedPath, ct);
             if (!extraction.Success || extraction.Metadata is null)
                 return ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.InvalidReferenceData,
                     "Invalid reference data",
                     extraction.ErrorMessage ?? "The uploaded file is not a valid reference dataset.");
+
+            // Reject a byte-identical re-upload: hash the staged bytes and compare
+            // against every stored dataset, so the same benchmark can't pile up
+            // under different display names.
+            var contentHash = await ComputeContentHashAsync(stagedPath, ct);
+            foreach (var existingId in storage.EnumerateIds())
+            {
+                var existingPath = storage.DataPath(existingId);
+                if (!File.Exists(existingPath)) continue;
+                if (await ComputeContentHashAsync(existingPath, ct) != contentHash) continue;
+                var existing = ReadSidecar(storage, existingId);
+                return ProblemDetailsHelper.Conflict(
+                    ProblemCodes.DuplicateReferenceData,
+                    "Duplicate reference dataset",
+                    $"An identical reference dataset already exists as " +
+                    $"'{existing?.DisplayName ?? existingId}'.");
+            }
 
             var id = FileStorage.GenerateId();
             var fileInfo = new FileInfo(stagedPath);
@@ -108,13 +132,16 @@ public static class ReferenceDataEndpoints
 
             var sidecarJson = JsonSerializer.Serialize(sidecar);
             await storage.CommitAsync(id, stagedPath, sidecarJson, ct);
+            committed = true;
             return Results.Created($"/admin/reference-data/{id}",
                 AdminReferenceDataMetadata.From(id, sidecar));
         }
-        catch
+        finally
         {
-            storage.Discard(stagedPath);
-            throw;
+            // Any exit that did not commit — extraction 400, duplicate 409, or a
+            // thrown exception — leaves the staged temp file behind; discard it so
+            // invalid uploads don't accumulate staging-*.tmp files in the storage root.
+            if (!committed) storage.Discard(stagedPath);
         }
     }
 
@@ -122,9 +149,12 @@ public static class ReferenceDataEndpoints
     public static IResult AdminDelete(string id, ReferenceDataStorage storage)
     {
         if (!FileStorage.IsValidId(id))
-            return ProblemDetailsHelper.BadRequest("Invalid id", "The id must be 32 hex characters.");
+            return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.InvalidId, "Invalid id", "The id must be 32 hex characters.");
         if (!storage.Exists(id))
-            return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found");
+            return ProblemDetailsHelper.NotFound(
+                ProblemCodes.ResourceNotFound, "Not found",
+                "The requested reference dataset does not exist.");
         storage.Delete(id);
         return Results.NoContent();
     }
@@ -140,6 +170,13 @@ public static class ReferenceDataEndpoints
         {
             return null;
         }
+    }
+
+    /// <summary>Uppercase-hex SHA-256 of a file's raw bytes, for duplicate detection.</summary>
+    static async Task<string> ComputeContentHashAsync(string path, CancellationToken ct)
+    {
+        await using var stream = File.OpenRead(path);
+        return Convert.ToHexString(await SHA256.HashDataAsync(stream, ct));
     }
 
     static bool IsJsonContentType(string? contentType) =>

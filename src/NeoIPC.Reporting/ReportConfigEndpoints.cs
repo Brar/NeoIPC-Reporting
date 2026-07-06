@@ -49,12 +49,25 @@ public static class ReportConfigEndpoints
     }
 
     /// <summary>
-    /// Returns the language tags <paramref name="reportName"/> supports —
-    /// the locales for which a <c>{Report}.&lt;lang&gt;.qmd</c> wrapper was
-    /// found at warmup (the master English QMD's bare tag included),
-    /// sorted for determinism. The app maps each tag to a human-readable
-    /// language name client-side; the wire value stays the tag.
+    /// Returns the locale tags <paramref name="reportName"/> offers in its
+    /// language picker: the <b>distinct language subtags</b> it serves. Because
+    /// <see cref="LocaleResolver"/> serves exactly one territory per language,
+    /// each is offered as its bare subtag (<c>en</c>) — there is nothing to
+    /// disambiguate — and the registry's redundant territory key (the master
+    /// English QMD registers both <c>en</c> and <c>en-GB</c>, while the QMD
+    /// lookup keys off the bare language) collapses into it. A language served
+    /// in more than one territory would instead need territory-qualified tags
+    /// (<c>en-GB</c>, <c>en-US</c>); that case is not handled here. Bare-tag
+    /// requests resolve regardless. The app maps each tag to a human-readable
+    /// language name client-side.
     /// </summary>
     public static IResult Locales(string reportName, ReportLanguageRegistry registry) =>
-        Results.Ok(registry.ForReport(reportName).Keys.OrderBy(k => k, StringComparer.Ordinal).ToArray());
+        Results.Ok(registry.ForReport(reportName).Keys
+            .Select(LanguageSubtag)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(tag => tag, StringComparer.Ordinal)
+            .ToArray());
+
+    /// <summary>The lower-cased BCP-47 language subtag of a locale tag (<c>en-GB</c> → <c>en</c>).</summary>
+    static string LanguageSubtag(string tag) => tag.Split('-', '_')[0].ToLowerInvariant();
 }

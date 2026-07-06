@@ -58,7 +58,7 @@ class PartnerReport
         [FromQuery] bool? includeNonCorePatients,
         [FromQuery] bool? includeTestData,
         [FromQuery] ushort? sparseDataThreshold,
-        [FromQuery] ConfidenceIntervalMode? confidenceIntervals,
+        [FromQuery] string? confidenceIntervals,
         [FromQuery] bool? includeIntroductionTexts,
         [FromQuery] bool? includeMethodsTexts,
         [FromQuery] bool? includeOutlierInterpretation,
@@ -93,13 +93,19 @@ class PartnerReport
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
+        if (!ConfidenceIntervalConverter.TryParse(confidenceIntervals, out var confidenceIntervalMode))
+            return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.InvalidConfidenceIntervals,
+                "Invalid confidenceIntervals",
+                "The 'confidenceIntervals' parameter must be one of: all, rate, none.");
+
         return await Handle(
             apiParameters: BuildApiParameters(
                 referenceDataFile, locale,
                 unitCodes, reportingPeriodFrom, reportingPeriodTo,
                 birthWeightFrom, birthWeightTo, gestationalAgeFrom, gestationalAgeTo,
                 includeNonCorePatients, includeTestData, sparseDataThreshold,
-                confidenceIntervals, includeIntroductionTexts, includeMethodsTexts,
+                confidenceIntervalMode, includeIntroductionTexts, includeMethodsTexts,
                 includeOutlierInterpretation,
                 includeBirthWeightFigure, includeGestationalAgeFigure,
                 includeIncidenceDensityTable, includeDeviceAssociatedIncidenceDensityTable,
@@ -120,7 +126,7 @@ class PartnerReport
         [FromQuery] string? locale,
         [FromQuery] string[] unitCodes,
         [FromQuery] ushort? sparseDataThreshold,
-        [FromQuery] ConfidenceIntervalMode? confidenceIntervals,
+        [FromQuery] string? confidenceIntervals,
         [FromQuery] bool? includeIntroductionTexts,
         [FromQuery] bool? includeMethodsTexts,
         [FromQuery] bool? includeOutlierInterpretation,
@@ -157,9 +163,16 @@ class PartnerReport
     {
         if (httpRequest.ContentLength is null or 0)
             return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.MissingPartnerDataBody,
                 "Missing partnerData body",
                 "POST /partner-report requires the partner-data JSON in the request body. " +
                 "Use GET for online mode (no body).");
+
+        if (!ConfidenceIntervalConverter.TryParse(confidenceIntervals, out var confidenceIntervalMode))
+            return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.InvalidConfidenceIntervals,
+                "Invalid confidenceIntervals",
+                "The 'confidenceIntervals' parameter must be one of: all, rate, none.");
 
         return await Handle(
             apiParameters: BuildApiParameters(
@@ -168,7 +181,7 @@ class PartnerReport
                 birthWeightFrom: null, birthWeightTo: null,
                 gestationalAgeFrom: null, gestationalAgeTo: null,
                 includeNonCorePatients: null, includeTestData: null,
-                sparseDataThreshold, confidenceIntervals,
+                sparseDataThreshold, confidenceIntervalMode,
                 includeIntroductionTexts, includeMethodsTexts, includeOutlierInterpretation,
                 includeBirthWeightFigure, includeGestationalAgeFigure,
                 includeIncidenceDensityTable, includeDeviceAssociatedIncidenceDensityTable,
@@ -255,8 +268,20 @@ class PartnerReport
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        if (apiParameters.AcceptHeaders.IsDefaultOrEmpty
-            || apiParameters.AcceptLanguageHeaders.IsDefaultOrEmpty)
+        if (apiParameters.AcceptHeaders.IsDefaultOrEmpty)
+            return Results.StatusCode(406);
+
+        // A rendering locale is mandatory only for the rendered (html/pdf)
+        // outputs. The application/json data output is the raw neoipcr dataset
+        // (codes), which is locale-independent, so it must not be gated on a
+        // locale here: when the caller accepts application/json (or gives an
+        // explicit ?locale=) let producer selection proceed — the JSON path
+        // defaults its process locale (RScriptReportProducer.DefaultLocale).
+        // Refuse up front only when no locale is available AND the request can
+        // be satisfied only by a rendered output.
+        if (apiParameters.AcceptLanguageHeaders.IsDefaultOrEmpty
+            && string.IsNullOrWhiteSpace(apiParameters.Locale)
+            && OutputNegotiation.OnlyRenderedOutputsAreAcceptable(apiParameters.AcceptHeaders))
             return Results.StatusCode(406);
 
         // API-boundary YAML safety; see ReferenceReport for the rationale.
@@ -266,8 +291,12 @@ class PartnerReport
             ?? InputValidation.RejectUnsafeStringArray(nameof(apiParameters.UnitCodes), apiParameters.UnitCodes);
         if (unsafeInput is not null) return unsafeInput;
 
-        if (apiParameters.UnitCodes is null or { Length: 0 })
+        // unitCodes names the department to live-fetch in online mode (GET). In
+        // dataFile mode (POST) the department dataset IS the request body, so
+        // unitCodes is irrelevant and the app omits it — require it only online.
+        if (partnerDataBody is null && apiParameters.UnitCodes is null or { Length: 0 })
             return ProblemDetailsHelper.BadRequest(
+                ProblemCodes.MissingUnitCodes,
                 "Missing unitCodes",
                 "The 'unitCodes' query parameter is required.");
 
@@ -282,10 +311,12 @@ class PartnerReport
         {
             if (!FileStorage.IsValidId(apiParameters.ReferenceDataFile))
                 return ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.InvalidReferenceDataFile,
                     "Invalid referenceDataFile",
                     "The 'referenceDataFile' must be 32 hex characters.");
             if (!referenceDataStorage.Exists(apiParameters.ReferenceDataFile))
                 return ProblemDetailsHelper.NotFound(
+                    ProblemCodes.ReferenceDatasetNotFound,
                     "Reference dataset not found",
                     $"No reference dataset is stored under id '{apiParameters.ReferenceDataFile}'.");
         }
@@ -441,6 +472,7 @@ class PartnerReport
         {
             { Status: LocaleResolver.Status.ExplicitUnsupported } =>
                 (null, ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.UnsupportedLocale,
                     "Unsupported locale",
                     $"The 'locale' parameter '{apiParameters.Locale}' is not supported by this report.")),
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>
@@ -465,12 +497,17 @@ class PartnerReport
         {
             { Status: LocaleResolver.Status.ExplicitUnsupported } =>
                 (null, ProblemDetailsHelper.BadRequest(
+                    ProblemCodes.UnsupportedLocale,
                     "Unsupported locale",
                     $"The 'locale' parameter '{apiParameters.Locale}' is not supported by this report.")),
             { Status: LocaleResolver.Status.Resolved, Locale: { } loc } =>
                 (new RScriptPartnerReportProducer(mediaType, loc, apiParameters, renderParameters,
                     options, environment, loggerFactory), null),
-            _ => (null, null),
+            // NoMatch: the application/json data output is locale-independent
+            // (raw neoipcr codes), so an unnegotiable locale is not an error
+            // here — default the child's LC_ALL (RScriptReportProducer.DefaultLocale).
+            _ => (new RScriptPartnerReportProducer(mediaType, RScriptReportProducer.DefaultLocale,
+                apiParameters, renderParameters, options, environment, loggerFactory), null),
         };
     }
 

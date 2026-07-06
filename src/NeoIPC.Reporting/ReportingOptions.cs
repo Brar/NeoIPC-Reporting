@@ -76,19 +76,59 @@ public sealed class ReportingOptions
     public string ValidationExceptionsDir { get; set; } = "/home/app/NeoIPC/ValidationExceptions";
 
     /// <summary>
-    /// When <c>true</c> AND the host environment is Development, a failed
-    /// render's per-render workdir (<c>render_&lt;random&gt;/</c> under
-    /// <see cref="ReportsTempDir"/>) is kept instead of deleted, so its
-    /// <c>.tex</c>, the Quarto/Pandoc/lualatex logs, and the generated figures
-    /// can be inspected locally. Double-gated (this flag AND
-    /// <c>IWebHostEnvironment.IsDevelopment()</c>) on purpose: a kept workdir
-    /// holds the rendered report — i.e. surveillance data — so it must never be
-    /// retained on a production instance. Default <c>false</c>. Kept workdirs
-    /// are not auto-reaped: a Development session with repeated render failures
-    /// accumulates them under <see cref="ReportsTempDir"/> until cleared by hand
-    /// (each retained path is logged when it is kept).
+    /// Language subtags whose report localization is complete enough to
+    /// offer and render. The warmup service registers a report's base
+    /// English master and any <c>&lt;Report&gt;.&lt;lang&gt;.qmd</c>
+    /// translation only when the language appears here — so a committed but
+    /// incompletely-localized translation (missing its
+    /// <c>_quarto-&lt;lang&gt;.yml</c>, sparse content) is neither advertised
+    /// in the app's language picker nor resolved to via <c>Accept-Language</c>,
+    /// both of which would otherwise fail the render. Defaults to English
+    /// only; add a language once its translation is render-ready. Keep
+    /// <c>"en"</c> (the source) listed unless deliberately disabling the
+    /// report entirely — dropping it registers no languages and makes every
+    /// report unresolvable.
     /// </summary>
-    public bool KeepFailedRenderWorkdir { get; set; }
+    public string[] RenderReadyLanguages { get; set; } = ["en"];
+
+    /// <summary>
+    /// Which render workdirs (<c>render_&lt;random&gt;/</c> under
+    /// <see cref="ReportsTempDir"/>) are kept for local inspection instead of
+    /// deleted on dispose — none, failed renders only, or every render. A kept
+    /// workdir holds its <c>.tex</c>, the Quarto/Pandoc/lualatex logs, the
+    /// generated figures, and the rendered report itself. Default
+    /// <see cref="RenderWorkdirRetention.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// Double-gated on purpose: any non-<see cref="RenderWorkdirRetention.None"/>
+    /// value is honoured only when <c>IWebHostEnvironment.IsDevelopment()</c> —
+    /// a kept workdir holds the rendered report, i.e. surveillance data, so it
+    /// must never be retained on a production instance regardless of this
+    /// setting. Kept workdirs are not auto-reaped: a Development session
+    /// accumulates them under <see cref="ReportsTempDir"/> until cleared by hand
+    /// (each retained path is logged when it is kept), so
+    /// <see cref="RenderWorkdirRetention.All"/> is a deliberate local-diagnostics
+    /// choice.
+    /// </remarks>
+    public RenderWorkdirRetention RenderWorkdirRetention { get; set; }
+}
+
+/// <summary>
+/// Selects which of <see cref="QuartoReportProducer"/>'s per-render workdirs
+/// (<c>render_&lt;random&gt;/</c> under <see cref="ReportingOptions.ReportsTempDir"/>)
+/// survive on dispose for local inspection. Honoured only in Development — see
+/// <see cref="ReportingOptions.RenderWorkdirRetention"/>.
+/// </summary>
+public enum RenderWorkdirRetention
+{
+    /// <summary>Delete every render workdir on dispose (default).</summary>
+    None,
+
+    /// <summary>Keep a failed render's workdir; delete it on success.</summary>
+    Failed,
+
+    /// <summary>Keep every render workdir, whether it succeeded or failed.</summary>
+    All,
 }
 
 /// <summary>

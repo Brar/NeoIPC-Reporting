@@ -55,6 +55,13 @@ override `Reporting:Dhis2BaseUrl` via env var or
 
 ## Build modes (Docker)
 
+**Released images are built from pinned tags.** The `release` workflow builds in `github-tag` mode
+from the tags recorded in [`pinned-sources.yml`](pinned-sources.yml) (a Surveillance-Toolkit
+`reports-v*` tag and a neoipcr tag), so every published `ghcr.io/neoipc/neoipc-reporting:<ver>` bakes
+immutable, reproducible sources and records them as `net.neoipc.*` image labels (inspect with
+`docker inspect`). To change what an image bakes, edit `pinned-sources.yml` and cut a new release. The
+modes below are the underlying Dockerfile options used for that and for local/dev builds.
+
 Three reports-source modes via `--build-arg REPORTS_SOURCE`:
 
 | Mode | What it does | Build-args (defaults shown) |
@@ -67,7 +74,7 @@ Three neoipcr-source modes via `--build-arg NEOIPCR_SOURCE`:
 
 | Mode | What it does | Build-args (defaults shown) |
 |------|-------------|------------------------------|
-| `github-branch` (default) | `pak::pkg_install("${NEOIPCR_REPO}@${NEOIPCR_BRANCH}")` | `NEOIPCR_REPO=Brar/neoipcr`, `NEOIPCR_BRANCH=TowardsReferenceReport` |
+| `github-branch` (default) | `pak::pkg_install("${NEOIPCR_REPO}@${NEOIPCR_BRANCH}")` | `NEOIPCR_REPO=NeoIPC/neoipcr`, `NEOIPCR_BRANCH=main` |
 | `github-tag`              | `pak::pkg_install("${NEOIPCR_REPO}@${NEOIPCR_TAG}")` | `NEOIPCR_REPO=…`, `NEOIPCR_TAG=vX.Y.Z` (required) |
 | `workspace`               | COPY from the named build context `neoipcr` to `/neoipcr`, install `devtools` | — |
 
@@ -87,7 +94,7 @@ for the sibling checkouts, instead of widening the main context.
 ### Examples
 
 ```bash
-# Standalone build against the current dev branches on a fork.
+# Standalone build against a fork's feature branches (dev iteration).
 cd repos/NeoIPC-Reporting
 docker build -f src/NeoIPC.Reporting/Dockerfile \
   --build-arg REPORTS_REPO=https://github.com/Brar/Surveillance-Toolkit.git \
@@ -96,11 +103,12 @@ docker build -f src/NeoIPC.Reporting/Dockerfile \
   --build-arg NEOIPCR_BRANCH=PartnerReport \
   -t neoipc-reporting:dev .
 
-# Tagged toolkit + tagged neoipcr (upstream).
+# Pinned tags (the release path): a Surveillance-Toolkit reports-v* tag + a neoipcr tag.
+# These are the values pinned-sources.yml records; the release workflow passes them for you.
 docker build -f src/NeoIPC.Reporting/Dockerfile \
-  --build-arg REPORTS_SOURCE=github-tag --build-arg REPORTS_TAG=v1.2.0 \
-  --build-arg NEOIPCR_SOURCE=github-tag --build-arg NEOIPCR_TAG=v0.1.0 \
-  -t neoipc-reporting:v1.2.0 .
+  --build-arg REPORTS_SOURCE=github-tag --build-arg REPORTS_TAG=reports-v0.1.0-alpha \
+  --build-arg NEOIPCR_SOURCE=github-tag --build-arg NEOIPCR_TAG=v0.1.0.9000 \
+  -t neoipc-reporting:v0.1.4 .
 
 # Workspace build (sibling checkouts supplied via named build contexts).
 cd repos/NeoIPC-Reporting

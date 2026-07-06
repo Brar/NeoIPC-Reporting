@@ -3,20 +3,21 @@ name: release
 # Build the service image and publish it to the GitHub Container Registry.
 # Triggered on version tags (the release path) and on manual dispatch (for
 # out-of-band rebuilds). The image bakes in the report sources and neoipcr
-# tracked by each source repo's `current` branch; both are overridable on
-# dispatch.
+# pinned by pinned-sources.yml (immutable upstream tags), so every published
+# image records exactly which sources it shipped. Dispatch can override the
+# pinned tags for a one-off rebuild.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
-      reports_branch:
-        description: Surveillance-Toolkit branch to bake in
-        default: current
+      reports_tag:
+        description: Surveillance-Toolkit reports tag to bake in (blank = pinned-sources.yml)
+        default: ''
         required: false
-      neoipcr_branch:
-        description: neoipcr branch to bake in
-        default: current
+      neoipcr_tag:
+        description: neoipcr tag to bake in (blank = pinned-sources.yml)
+        default: ''
         required: false
       extra_tag:
         description: additional image tag to publish (optional)
@@ -37,6 +38,53 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - id: pins
+        name: Resolve pinned sources + enforce cross-repo consistency
+        # Read the baked-in source tags from pinned-sources.yml (a workflow_dispatch input overrides the
+        # corresponding pin for a one-off rebuild), then enforce they are real, mutually-consistent releases before
+        # the expensive image build. yq (mikefarah v4) + curl are pre-installed on the runner; the tag/compat checks
+        # hit public GitHub repos (no auth, not the DHIS2 API).
+        shell: bash
+        run: |
+          set -euo pipefail
+          reports_tag='${{ inputs.reports_tag }}'
+          neoipcr_tag='${{ inputs.neoipcr_tag }}'
+          [ -n "$reports_tag" ] || reports_tag="$(yq '.reports.tag' pinned-sources.yml)"
+          [ -n "$neoipcr_tag" ] || neoipcr_tag="$(yq '.neoipcr.tag' pinned-sources.yml)"
+          for pair in "reports_tag=$reports_tag" "neoipcr_tag=$neoipcr_tag"; do
+            v="${pair#*=}"
+            [ -n "$v" ] && [ "$v" != "null" ] || { echo "::error::pinned-sources.yml is missing ${pair%%=*}."; exit 1; }
+          done
+
+          # The pinned reports + neoipcr must be real published releases — otherwise the Dockerfile clones/installs a
+          # non-existent tag and fails late with a confusing error.
+          tag_exists() { git ls-remote --exit-code --tags "https://github.com/$1.git" "refs/tags/$2" >/dev/null 2>&1; }
+          tag_exists NeoIPC/Surveillance-Toolkit "$reports_tag" || { echo "::error::reports tag '$reports_tag' is not a published Surveillance-Toolkit release."; exit 1; }
+          tag_exists NeoIPC/neoipcr "$neoipcr_tag" || { echo "::error::neoipcr tag '$neoipcr_tag' is not a published neoipcr release."; exit 1; }
+
+          # The reports release records which neoipcr + neoipc-app it was validated against. Fetch that record AT the
+          # pinned reports tag and require the neoipcr this image bakes to be exactly the one the reports were tested
+          # with; derive the neoipc-app compatibility to stamp on the image from the same record, so the label stays
+          # correct even when reports_tag is overridden on dispatch.
+          compat_url="https://raw.githubusercontent.com/NeoIPC/Surveillance-Toolkit/${reports_tag}/reports/compatibility.yml"
+          compat="$(curl -fsSL "$compat_url")" || { echo "::error::could not fetch reports/compatibility.yml at $reports_tag ($compat_url)."; exit 1; }
+          reports_neoipcr="$(printf '%s' "$compat" | yq '.neoipcr.tested')"
+          app_tested="$(printf '%s' "$compat" | yq '.["neoipc-app"].tested')"
+          [ -n "$reports_neoipcr" ] && [ "$reports_neoipcr" != "null" ] || { echo "::error::reports release $reports_tag declares no neoipcr.tested."; exit 1; }
+          [ -n "$app_tested" ] && [ "$app_tested" != "null" ] || { echo "::error::reports release $reports_tag declares no neoipc-app.tested."; exit 1; }
+
+          if [ "$neoipcr_tag" != "$reports_neoipcr" ]; then
+            echo "::error::this image would bake neoipcr $neoipcr_tag, but reports release $reports_tag was tested against neoipcr $reports_neoipcr. Pin the matching neoipcr, or re-test + re-release the reports."
+            exit 1
+          fi
+          tag_exists NeoIPC/neoipc-app "$app_tested" || { echo "::error::reports release $reports_tag names neoipc-app $app_tested (tested) but no such neoipc-app release exists."; exit 1; }
+
+          {
+            echo "reports_tag=$reports_tag"
+            echo "neoipcr_tag=$neoipcr_tag"
+            echo "app_tested=$app_tested"
+          } >> "$GITHUB_OUTPUT"
+          echo "Pinned & consistent: reports=$reports_tag neoipcr=$neoipcr_tag neoipc-app(tested)=$app_tested"
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -55,6 +103,11 @@ jobs:
             type=raw,value=latest,enable=${{ github.event_name == 'push' }}
             type=raw,value=edge,enable=${{ github.event_name == 'workflow_dispatch' }}
             type=raw,value=${{ inputs.extra_tag }},enable=${{ inputs.extra_tag != '' }}
+          # Stamp the baked-in source versions onto the image so a pulled image self-describes.
+          labels: |
+            net.neoipc.reports.version=${{ steps.pins.outputs.reports_tag }}
+            net.neoipc.neoipcr.version=${{ steps.pins.outputs.neoipcr_tag }}
+            net.neoipc.app.tested=${{ steps.pins.outputs.app_tested }}
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -62,10 +115,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Pinned, reproducible sources: immutable upstream tags, not a mutable branch.
           build-args: |
-            REPORTS_SOURCE=github-branch
+            REPORTS_SOURCE=github-tag
             REPORTS_REPO=https://github.com/NeoIPC/Surveillance-Toolkit.git
-            REPORTS_BRANCH=${{ inputs.reports_branch || 'current' }}
-            NEOIPCR_SOURCE=github-branch
+            REPORTS_TAG=${{ steps.pins.outputs.reports_tag }}
+            NEOIPCR_SOURCE=github-tag
             NEOIPCR_REPO=NeoIPC/neoipcr
-            NEOIPCR_BRANCH=${{ inputs.neoipcr_branch || 'current' }}
+            NEOIPCR_TAG=${{ steps.pins.outputs.neoipcr_tag }}
