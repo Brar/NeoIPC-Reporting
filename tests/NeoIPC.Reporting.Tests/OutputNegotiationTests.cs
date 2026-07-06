@@ -52,4 +52,28 @@ public class OutputNegotiationTests
             Assert.That(OutputNegotiation.OnlyRenderedOutputsAreAcceptable([]), Is.False);
         });
     }
+
+    [Test]
+    public void SortAccept_DropsZeroQualityEntries()
+    {
+        // RFC 9110 §12.4.2: q=0 means "not acceptable", so the type must be dropped —
+        // otherwise it slips past the locale gate or is served as a fallback.
+        var kept = OutputNegotiation.SortAccept(
+        [
+            MediaTypeHeaderValue.Parse("application/json;q=0"),
+            MediaTypeHeaderValue.Parse("text/html"),
+        ]).Select(h => h.MediaType.ToString()).ToList();
+        Assert.That(kept, Is.EqualTo(new[] { "text/html" }));
+    }
+
+    [Test]
+    public void SortAcceptLanguage_DropsZeroQualityEntries()
+    {
+        var kept = OutputNegotiation.SortAcceptLanguage(
+        [
+            StringWithQualityHeaderValue.Parse("de;q=0"),
+            StringWithQualityHeaderValue.Parse("en"),
+        ]).Select(h => h.Value.ToString()).ToList();
+        Assert.That(kept, Is.EqualTo(new[] { "en" }));
+    }
 }

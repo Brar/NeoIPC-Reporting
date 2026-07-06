@@ -10,20 +10,28 @@ namespace NeoIPC.Reporting;
 /// </summary>
 public static class OutputNegotiation
 {
-    /// <summary>Sorts <c>Accept</c> headers by q-value (descending), preserving header order on ties.</summary>
+    /// <summary>
+    /// Drops entries with <c>q=0</c> (RFC 9110 §12.4.2 "not acceptable"), then sorts
+    /// <c>Accept</c> headers by q-value (descending), preserving header order on ties.
+    /// </summary>
     public static IEnumerable<MediaTypeHeaderValue> SortAccept(IList<MediaTypeHeaderValue> headers)
         => headers
             .Select((h, i) => (h.MediaType, Quality: h.Quality ?? 1.0, Index: i, Value: h))
-            .Where(h => h.MediaType.HasValue)
+            // A q-value of 0 means "not acceptable" (RFC 9110 §12.4.2) — drop it so it is
+            // neither offered as a fallback nor able to slip past the locale gate.
+            .Where(h => h.MediaType.HasValue && h.Quality > 0)
             .OrderByDescending(h => h.Quality).ThenBy(h => h.Index)
             .Select(h => h.Value);
 
-    /// <summary>Sorts <c>Accept-Language</c> headers by q-value (descending), preserving header order on ties.</summary>
+    /// <summary>
+    /// Drops entries with <c>q=0</c> (RFC 9110 §12.4.2 "not acceptable"), then sorts
+    /// <c>Accept-Language</c> headers by q-value (descending), preserving header order on ties.
+    /// </summary>
     public static IEnumerable<StringWithQualityHeaderValue> SortAcceptLanguage(
         IList<StringWithQualityHeaderValue> headers)
         => headers
             .Select((h, i) => (Quality: h.Quality ?? 1.0, Index: i, Language: h.Value, Value: h))
-            .Where(h => h.Language.HasValue)
+            .Where(h => h.Language.HasValue && h.Quality > 0)
             .OrderByDescending(h => h.Quality).ThenBy(h => h.Index)
             .Select(h => h.Value);
 

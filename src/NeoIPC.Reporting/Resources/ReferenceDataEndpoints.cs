@@ -82,6 +82,7 @@ public static class ReferenceDataEndpoints
                 "Reference-data upload requires Content-Type: application/json.");
 
         var stagedPath = await storage.StageAsync(request.Body, ct);
+        var committed = false;
         try
         {
             var extraction = await extractor.ExtractAsync(stagedPath, ct);
@@ -101,7 +102,6 @@ public static class ReferenceDataEndpoints
                 if (!File.Exists(existingPath)) continue;
                 if (await ComputeContentHashAsync(existingPath, ct) != contentHash) continue;
                 var existing = ReadSidecar(storage, existingId);
-                storage.Discard(stagedPath);
                 return ProblemDetailsHelper.Conflict(
                     ProblemCodes.DuplicateReferenceData,
                     "Duplicate reference dataset",
@@ -132,13 +132,16 @@ public static class ReferenceDataEndpoints
 
             var sidecarJson = JsonSerializer.Serialize(sidecar);
             await storage.CommitAsync(id, stagedPath, sidecarJson, ct);
+            committed = true;
             return Results.Created($"/admin/reference-data/{id}",
                 AdminReferenceDataMetadata.From(id, sidecar));
         }
-        catch
+        finally
         {
-            storage.Discard(stagedPath);
-            throw;
+            // Any exit that did not commit — extraction 400, duplicate 409, or a
+            // thrown exception — leaves the staged temp file behind; discard it so
+            // invalid uploads don't accumulate staging-*.tmp files in the storage root.
+            if (!committed) storage.Discard(stagedPath);
         }
     }
 
