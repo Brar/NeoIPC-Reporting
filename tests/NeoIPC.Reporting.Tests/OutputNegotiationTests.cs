@@ -76,4 +76,20 @@ public class OutputNegotiationTests
         ]).Select(h => h.Value.ToString()).ToList();
         Assert.That(kept, Is.EqualTo(new[] { "en" }));
     }
+
+    [Test]
+    public void OnlyRenderedOutputsAreAcceptable_IgnoresZeroQuality()
+    {
+        // q=0 = "not acceptable" (RFC 9110), so even given a raw (unsorted) array
+        // the helper must not treat a q=0 data type as acceptable: json;q=0 + a
+        // rendered type + no locale is still a rendered-only (406) request.
+        Assert.Multiple(() =>
+        {
+            Assert.That(OutputNegotiation.OnlyRenderedOutputsAreAcceptable(
+                Accept("application/json;q=0", "text/html")), Is.True);
+            // With the only rendered type at q=0, nothing rendered remains → not rendered-only.
+            Assert.That(OutputNegotiation.OnlyRenderedOutputsAreAcceptable(
+                Accept("application/pdf;q=0", "application/json")), Is.False);
+        });
+    }
 }

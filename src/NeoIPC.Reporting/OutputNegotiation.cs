@@ -57,6 +57,10 @@ public static class OutputNegotiation
         var data = false;
         foreach (var header in acceptHeaders)
         {
+            // A q-value of 0 means "not acceptable" (RFC 9110 §12.4.2). SortAccept
+            // already drops these upstream, but the helper must not depend on the
+            // caller pre-filtering — a q=0 type is never an acceptable output.
+            if (header.Quality is <= 0) continue;
             var mediaType = header.MediaType.ToString();
             if (QuartoReportProducer.IsMediaTypeSupported(mediaType)) rendered = true;
             if (RScriptReportProducer.IsMediaTypeSupported(mediaType)) data = true;
