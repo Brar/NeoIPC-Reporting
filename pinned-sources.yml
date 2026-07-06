@@ -1,0 +1,25 @@
+# Pinned upstream sources baked into the NeoIPC-Reporting container image.
+#
+# The release workflow (.github/workflows/release.yml) reads these and builds the image in
+# `github-tag` mode, so every published ghcr.io/neoipc/neoipc-reporting:<ver> records exactly which
+# report sources and neoipcr it shipped — reproducible, not floating on a mutable branch. The pinned
+# values are also stamped onto the image as OCI labels (net.neoipc.*).
+#
+# The referenced tags MUST exist upstream before a release build (the workflow verifies this, and the
+# build clones/installs them):
+#   * reports.tag  — a Surveillance-Toolkit `reports-v*` release tag (git clone --branch <tag>)
+#   * neoipcr.tag  — a neoipcr tag (pak::pkg_install "NeoIPC/neoipcr@<tag>")
+#
+# The workflow also enforces that neoipcr.tag equals the neoipcr the pinned reports release was tested
+# against (from that release's reports/compatibility.yml), and derives the neoipc-app compatibility
+# stamped on the image from the same record — so neoipc-app is NOT pinned here; it follows the reports
+# release. To bump what an image bakes: change these, commit, and cut a new NeoIPC-Reporting release.
+
+reports:
+  # Surveillance-Toolkit NeoIPC Surveillance Reports release (dash-prefixed product tag).
+  tag: reports-v0.1.0-alpha
+
+neoipcr:
+  # neoipcr dev-snapshot tag (matches its DESCRIPTION dev version; v0.1.0 stays reserved for CRAN).
+  # Must equal the neoipcr the pinned reports release was tested against.
+  tag: v0.1.0.9000
