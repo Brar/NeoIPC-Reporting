@@ -443,9 +443,13 @@ public class ReportLoggingTests
         // TaskCanceledException, a subclass — CatchAsync accepts derived types)...
         Assert.CatchAsync<OperationCanceledException>(() => generate);
         // ...and the whole tree — including the grandchild, which only
-        // Kill(entireProcessTree) reaches — must be gone once it has unwound (the
-        // producer waits for the killed root before returning, so there is no race).
-        Assert.That(ProcessIsAlive(grandchildPid), Is.False, "the cancelled render's process tree (grandchild) was not killed");
+        // Kill(entireProcessTree) reaches — must be gone once it has unwound. The
+        // producer awaits the killed root, but the OS reaps the grandchild
+        // asynchronously, so poll until it is actually gone rather than reading it
+        // once — an immediate read can still catch the grandchild mid-teardown
+        // (the flake this guards against).
+        Assert.That(() => ProcessIsAlive(grandchildPid), Is.False.After(5000, 50),
+            "the cancelled render's process tree (grandchild) was not killed");
     }
 
     [Test]
@@ -528,11 +532,32 @@ public class ReportLoggingTests
         try
         {
             using var p = Process.GetProcessById(pid);
-            return !p.HasExited;
+            if (p.HasExited) return false;
+            // On Linux a SIGKILLed non-child process lingers as a zombie (state
+            // 'Z') — reparented to init, terminated but not yet reaped — and
+            // HasExited can still read false for it. Its work is already gone, so
+            // treat a zombie as dead; otherwise the tree-kill poll never resolves.
+            return !(OperatingSystem.IsLinux() && IsZombie(pid));
         }
         catch (ArgumentException)
         {
             return false; // no process with that id — it exited (and was reaped)
+        }
+    }
+
+    static bool IsZombie(int pid)
+    {
+        try
+        {
+            // /proc/<pid>/stat: "pid (comm) state ...". comm may contain spaces or
+            // ')', so read the state as the first char after the final ')'.
+            var stat = File.ReadAllText($"/proc/{pid}/stat");
+            var close = stat.LastIndexOf(')');
+            return close >= 0 && close + 2 < stat.Length && stat[close + 2] == 'Z';
+        }
+        catch
+        {
+            return false;
         }
     }
 
