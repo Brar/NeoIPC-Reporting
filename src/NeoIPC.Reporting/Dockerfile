@@ -11,9 +11,9 @@
 #     still pulls resolute security updates for the apt-managed libraries.
 #   * Version ARGs hold the bare number (no leading `v`); the `v` is prepended at
 #     the URL where the upstream tag carries one (TinyTeX, Quarto).
-#   * The TinyTeX / Quarto / esbuild `ADD --checksum` values are version-coupled
-#     and stay inline at their ADD lines — bump the checksum together with the
-#     matching version ARG here.
+#   * The TinyTeX / Quarto `ADD --checksum` values are version-coupled and stay
+#     inline at their ADD lines — bump the checksum together with the matching
+#     version ARG here.
 #   * TINYTEX_TLNET_SNAPSHOT must track TINYTEX_VERSION (its tlmgr revision has to
 #     match the bundle's — see the tinytex-builder stage).
 # ----------------------------------------------------------------------------
@@ -22,8 +22,7 @@ ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0-resolute@sha256:196f61c62
 ARG ALPINE_GIT_IMAGE=alpine/git:v2.52.0@sha256:4a0e72d49596a1f5d3701aeedafdadc5c0da4062be4657c7bdc4017387f591cc
 ARG TINYTEX_VERSION=2026.05
 ARG TINYTEX_TLNET_SNAPSHOT=2026/05/02
-ARG QUARTO_VERSION=1.9.38
-ARG ESBUILD_VERSION=0.27.3
+ARG QUARTO_VERSION=1.10.18
 # R (r-base-core) and the r-cran-* packages are deliberately NOT pinned in this inventory:
 # r2u is a rolling current-CRAN mirror with no dated snapshots and no old-version retention,
 # so a version pin can't be held — they track CRAN, and a deliberate validated rebuild is the
@@ -338,14 +337,26 @@ USER $APP_UID
 # demanding `tlmgr update --self`; the dated archive snapshot matches the bundle's tlmgr, so install just
 # works — and being immutable it makes the installed package set reproducible build-to-build. gnupg (added
 # above) lets tlmgr verify the snapshot's signature rather than warning "gpg unavailable".
+# Archival PDF (PDF/A-4) support for the reports' `pdf-standard`, which Quarto emits as
+# \DocumentMetadata{pdfstandard={a-4}, xmp=true} on LuaLaTeX. Note there is no `tagging=on`: Quarto adds
+# that only for the standards that require tagged structure (a-2a, a-3a, ua-1, ua-2), and the reports
+# deliberately declare a-4 alone because KOMA-Script cannot produce tagged structure — see the tripwire in
+# ReportLogDrain.cs. The tagging-stack packages are still needed: \DocumentMetadata pulls them in whether or
+# not tagging is active, and they are what a tagging-capable class would later require. latex-lab provides
+# documentmetadata-support.ltx (without it: "No support files for \DocumentMetadata found"); pdfmanagement
+# (renamed from the now-empty pdfmanagement-testphase stub) provides pdfmanagement-init.sty; tagpdf the
+# low-level tag engine; luamml the math→MathML tagging (loaded only when tagging is active, so an a-4-only
+# compile logs "luamml has been disabled"); colorprofiles the ICC output intent PDF/A needs. ALL must be
+# present at build time — the runtime image's minimal Perl (perl-base, no File::Find) cannot run tlmgr, so
+# there is deliberately no render-time auto-install fallback.
 RUN tar xf /tmp/TinyTeX.tar.xz -C $HOME && \
     ~/.TinyTeX/bin/x86_64-linux/tlmgr option repository https://texlive.info/tlnet-archive/${TINYTEX_TLNET_SNAPSHOT}/tlnet && \
     ~/.TinyTeX/bin/x86_64-linux/tlmgr install \
         anyfontsize babel babel-english babel-estonian babel-german \
         babel-greek babel-italian babel-spanish babel-turkish caption \
-        colortbl fontawesome5 footnotehyper koma-script luatexbase \
-        microtype multirow parskip pdfcol placeins \
-        selnolig tcolorbox tikzfill upquote wrapfig \
+        colorprofiles colortbl fontawesome5 footnotehyper koma-script latex-lab \
+        luamml luatexbase microtype multirow parskip pdfcol pdfmanagement placeins \
+        selnolig tagpdf tcolorbox tikzfill upquote wrapfig \
         xurl
 
 # ----------------------------------------------------------------------------
@@ -353,21 +364,14 @@ RUN tar xf /tmp/TinyTeX.tar.xz -C $HOME && \
 # ----------------------------------------------------------------------------
 FROM ${DOTNET_ASPNET_IMAGE} AS quarto-downloader
 ARG QUARTO_VERSION
-ARG ESBUILD_VERSION
-ADD --checksum=sha256:ea8c897368791ad9f200010c087ea3111b2e556b12a960487dd4e216902aa102 \
+ADD --checksum=sha256:afad071b5bd22c02f2d300695743189d3650e0537a53073e654b630cff2b0c73 \
     https://github.com/quarto-dev/quarto-cli/releases/download/v${QUARTO_VERSION}/quarto-${QUARTO_VERSION}-linux-amd64.tar.gz \
     /tmp/quarto.tar.gz
-ADD --checksum=sha256:066e20cdb882994160e18524a552b97e03648eb9aa0c7cdf5680a6493be65ab2 \
-    https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-${ESBUILD_VERSION}.tgz \
-    /tmp/esbuild.tgz
-# Replace Quarto's bundled esbuild with the pinned build, then drop only the tools we don't use.
-# Keep tools/x86_64/deno — it is Quarto's runtime (the `quarto` launcher execs it for every command),
-# so removing it breaks ALL rendering with exit 127. We render via LaTeX (not typst) and don't use
-# Jupyter, so those two are safe to drop.
+# Drop only the tools we don't use. Keep tools/x86_64/deno — it is Quarto's runtime (the `quarto`
+# launcher execs it for every command), so removing it breaks ALL rendering with exit 127. We render
+# via LaTeX (not typst) and don't use Jupyter, so those two are safe to drop.
 RUN mkdir -p /opt/quarto && \
     tar -zxf /tmp/quarto.tar.gz -C /opt/quarto --strip-components=1 && \
-    tar -zxf /tmp/esbuild.tgz -C /tmp && \
-    cp /tmp/package/bin/esbuild /opt/quarto/bin/tools/x86_64/esbuild && \
     rm -rf /opt/quarto/bin/tools/x86_64/typst* \
            /opt/quarto/share/jupyter
 
