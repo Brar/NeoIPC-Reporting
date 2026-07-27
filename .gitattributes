@@ -1,0 +1,45 @@
+# Line endings are LF everywhere, by repository contract rather than by machine configuration.
+#
+# Without this file the result depends on each developer's core.autocrlf, whose Git-for-Windows
+# installer default is `true` — that checks text files out as CRLF, and every tool that then reads
+# and rewrites one carries the CRLF back in. Declaring it here makes the outcome the same on every
+# checkout: normalize to LF on commit, and write LF into the working tree on checkout.
+#
+# It matters for the container build too: init-scripts/*.sh run inside the image, and a `#!` line
+# ending in CR fails outright with "bad interpreter" rather than misbehaving subtly.
+* text=auto eol=lf
+
+# Shell scripts are declared `text` unconditionally rather than left to the `text=auto` above:
+# `auto` guesses from content and would treat a script as binary if it ever contained a NUL byte,
+# silently dropping the eol guarantee for exactly the files where a stray CR is fatal.
+*.sh text eol=lf
+
+# Deliberately absent: any `*.cs text` rule. tests/NeoIPC.Reporting.Tests/SecurityRegressionTests.cs
+# contains a NUL byte as a null-byte-injection test vector, so forcing `text` on C# would run
+# end-of-line conversion over that file and corrupt the vector the test depends on.
+#
+# That file's exemption is DECLARED below rather than left to `text=auto`'s content sniffing. Detection
+# happens to get it right today, but relying on it is backwards: a stray NUL would then buy any file an
+# exemption from the line-ending, BOM and UTF-8 checks, silently, which is the class of corruption the
+# hygiene gate exists to catch. So the gate honours the attribute alone, and the attribute has to say it.
+tests/NeoIPC.Reporting.Tests/SecurityRegressionTests.cs -text
+
+# Binary files must never be touched by end-of-line conversion. `text=auto` guesses from content and
+# is usually right, but a file it misclassifies is corrupted rather than merely reformatted, so the
+# formats plausibly stored here are declared explicitly.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.docx  binary
+*.pptx  binary
+*.xlsx  binary
+*.zip   binary
+*.gz    binary
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.snk   binary
