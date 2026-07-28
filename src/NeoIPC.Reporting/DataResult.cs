@@ -1,4 +1,4 @@
-﻿namespace NeoIPC.Reporting;
+namespace NeoIPC.Reporting;
 
 /// <summary>
 /// Outcome of a single <see cref="IDataProducer.Generate"/> call:

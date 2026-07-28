@@ -1,0 +1,30 @@
+# Editor-side half of the LF policy declared in .gitattributes. Git normalizes what is committed;
+# this stops an editor writing CRLF into the working tree in the first place, so a diff never shows
+# a whole file changed because someone opened it in a tool with different defaults.
+#
+# `charset = utf-8` — never `utf-8-bom` — is the load-bearing setting for the C# here: Visual Studio
+# writes a UTF-8 BOM on .cs by default, and this is what stops it. Visual Studio and the JetBrains
+# IDEs (this repository ships an .idea/ directory and a .DotSettings) honour this file natively;
+# **VS Code does not** and needs the EditorConfig.EditorConfig extension, so the same line-ending and
+# encoding settings are repeated in .vscode/settings.json.
+root = true
+
+[*]
+end_of_line = lf
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Markdown uses two trailing spaces as a hard line break, so trailing whitespace is significant.
+[*.md]
+trim_trailing_whitespace = false
+
+# tests/NeoIPC.Reporting.Tests/SecurityRegressionTests.cs holds a NUL byte as a null-byte-injection
+# test vector, so git classifies it as binary and .gitattributes deliberately leaves it alone. Nothing
+# here can corrupt it (EditorConfig only acts when a file is edited and saved), but do not "fix" that
+# file's encoding or endings by hand either — the vector is the point of the test.
+
+# C# indentation is not otherwise configured in this repository; only encoding and line endings are
+# declared here, so a future .editorconfig style section can be added without conflicting.
+[*.{cs,csx}]
+charset = utf-8

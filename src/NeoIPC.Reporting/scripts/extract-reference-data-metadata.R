@@ -71,7 +71,14 @@ if (!is.null(metadata$calculated)) {
 # the header note), so jsonlite serialises it as its underlying list without a
 # bespoke asJSON method. The remaining options mirror the shape the .NET
 # extractor expects: scalars unboxed, dates ISO 8601.
+# A binary connection, because R translates LF to CRLF in text mode on Windows and passing a
+# path to writeLines() opens it as file(path, "w") — i.e. "wt". The container runs Linux, where
+# text mode emits LF anyway, but this script is also run directly on a developer's machine and
+# the JSON it writes is bound by the .NET service; the bytes must not depend on where it ran.
+# In binary mode sep is written literally, so stating it is what fixes the line endings.
+out_con <- file(out_path, open = "wb")
+on.exit(close(out_con), add = TRUE)
 writeLines(
   jsonlite::toJSON(metadata, auto_unbox = TRUE,
     null = "null", na = "null", Date = "ISO8601", POSIXt = "ISO8601"),
-  out_path)
+  out_con, sep = "\n", useBytes = TRUE)

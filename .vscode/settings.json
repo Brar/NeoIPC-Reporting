@@ -1,0 +1,11 @@
+{
+  // Line endings and encoding are declared in .gitattributes and .editorconfig, but VS Code does not
+  // honour .editorconfig without the EditorConfig.EditorConfig extension — so these two are repeated
+  // here to cover an editor that does not have it installed.
+  //
+  // "utf8" (not "utf8bom") is the load-bearing half for the C# in this repository: it is what keeps a
+  // UTF-8 BOM from reappearing on .cs files. Visual Studio and Rider take the same setting from
+  // .editorconfig's charset = utf-8.
+  "files.eol": "\n",
+  "files.encoding": "utf8"
+}
