@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using NUnit.Framework;
@@ -91,6 +92,24 @@ public class NegativePathTests
         return req;
     }
 
+    HttpRequestMessage Post(string path, string body)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            // The app is the only real client of this route and sends the file's
+            // own type, falling back to application/json. Bare StringContent
+            // sends text/plain, so a test built that way differs in shape from
+            // every request the route actually receives — not a difference the
+            // handler reads today, since it streams the body through without a
+            // content-type gate, but the fidelity is free.
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
+        req.Headers.Add("Cookie", "JSESSIONID=test-placeholder-session-id");
+        req.Headers.Add("Accept", "application/pdf");
+        req.Headers.Add("Accept-Language", "en");
+        return req;
+    }
+
     [Test]
     public async Task ReferenceReport_MissingAcceptLanguage_Returns406()
     {
@@ -162,6 +181,36 @@ public class NegativePathTests
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
     }
 
+    // Each live-fetch parameter needs its own case: asserting the status for one of
+    // them leaves every other member of the rejected set untested, so dropping one
+    // would keep the suite green while the endpoint answered 200 over the whole
+    // stored dataset. The body is checked for the parameter's own name, because a
+    // 400 alone is also what an id-format or confidence-interval failure returns.
+    [TestCase("reportingPeriodFrom=2024-01-01", "reportingPeriodFrom")]
+    [TestCase("reportingPeriodTo=2024-12-31", "reportingPeriodTo")]
+    [TestCase("birthWeightFrom=500", "birthWeightFrom")]
+    [TestCase("birthWeightTo=2500", "birthWeightTo")]
+    [TestCase("gestationalAgeFrom=24", "gestationalAgeFrom")]
+    [TestCase("gestationalAgeTo=32", "gestationalAgeTo")]
+    [TestCase("countryFilter=AT", "countryFilter")]
+    [TestCase("departmentFilter=AT_TEST_TEST", "departmentFilter")]
+    [TestCase("testUnitFilter=false", "testUnitFilter")]
+    [TestCase("defaultPatientFilter=false", "defaultPatientFilter")]
+    public async Task ReferenceReport_StoredDataset_RejectsEveryLiveFetchParam(
+        string query, string expectedName)
+    {
+        var response = await _http!.SendAsync(Get(
+            $"/reference-report?referenceDataId=any&{query}"));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+            Assert.That(body, Does.Contain(ProblemCodes.MixedModeNotAllowed));
+            Assert.That(body, Does.Contain(expectedName));
+        });
+    }
+
     [Test]
     public async Task ReferenceReport_AdHocMode_WithoutAuth_Returns403()
     {
@@ -186,20 +235,115 @@ public class NegativePathTests
     }
 
     [Test]
-    public async Task PartnerReport_MissingUnitCodes_Returns400()
+    public async Task PartnerReportOnline_MissingUnitCodes_Returns400()
     {
-        // POST with a body but no unitCodes query param. The body has to
-        // be present (otherwise it short-circuits to "Missing partnerData
-        // body" first); use a tiny placeholder.
-        var req = new HttpRequestMessage(HttpMethod.Post, "/partner-report")
+        // Online mode names the department to fetch, so it is the only mode
+        // that requires unitCodes — see the dataFile counterpart below. The
+        // check runs ahead of authorization, so it stays reachable with a
+        // session the container cannot validate.
+        var response = await _http!.SendAsync(Get("/partner-report"));
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+
+        // Name the guard rather than trusting the status. Several checks
+        // ahead of this one also answer 400, so a status-only assertion
+        // passes whichever fired — and would stay green if this guard
+        // became unreachable, which is exactly how it broke before.
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.That(body, Does.Contain(ProblemCodes.MissingUnitCodes));
+    }
+
+    [Test]
+    public async Task PartnerReportDataFile_MissingUnitCodes_IsAllowed()
+    {
+        // The uploaded dataset IS the department, so dataFile mode must not
+        // demand unitCodes — and the requirement is skipped rather than
+        // satisfied, which no test would notice if it were reinstated.
+        //
+        // Asserted as the absence of that rejection, not as a positive
+        // status: the request goes on to authorization, which this
+        // container cannot satisfy, so what it finally answers says nothing
+        // about this guard. Not-400 is still provable — the body is present,
+        // so the missing-body guard cannot fire either, and the inputs
+        // carry nothing the YAML-safety check rejects.
+        var response = await _http!.SendAsync(Post("/partner-report", "{}"));
+
+        Assert.That(response.StatusCode, Is.Not.EqualTo(HttpStatusCode.BadRequest));
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.That(body, Does.Not.Contain(ProblemCodes.MissingUnitCodes));
+    }
+
+    [Test]
+    public async Task PartnerReportDataFile_WithUnitCodes_Returns400()
+    {
+        // The uploaded dataset fixes the department, and the subtitle is front
+        // matter — evaluated before the setup chunk that reads the real
+        // department out of the dataset's metadata — so a unitCodes that
+        // disagrees cannot be corrected during the render. It would title the
+        // document with a department the document does not contain, so it is
+        // refused rather than ignored.
+        var req = new HttpRequestMessage(
+            HttpMethod.Post, "/partner-report?unitCodes=DE_TEST_TEST")
         {
-            Content = new StringContent("{}"),
+            Content = new StringContent("{}", Encoding.UTF8, "application/json"),
         };
         req.Headers.Add("Cookie", "JSESSIONID=test-placeholder-session-id");
         req.Headers.Add("Accept", "application/pdf");
         req.Headers.Add("Accept-Language", "en");
+
         var response = await _http!.SendAsync(req);
+
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+        var body = await response.Content.ReadAsStringAsync();
+        // Its own code, not the stored-reference one: a consumer maps each to a
+        // different message, so sharing a code would name the wrong cause.
+        Assert.That(body, Does.Contain(ProblemCodes.UploadedDataFixesScope));
+    }
+
+    [Test]
+    public async Task ReferenceReport_StoredDataset_WildcardAcceptWithoutLocale_Returns406()
+    {
+        // With a stored dataset there is no JSON output to fall back on — the
+        // R-script producer is skipped, because it would answer from a live
+        // DHIS2 fetch rather than from the stored dataset. So a caller offering
+        // */* and no locale can be served only by a rendered output, and the
+        // real blocker is the missing locale. Without this the request slips
+        // past the locale gate (*/* "accepts" a JSON output that cannot be
+        // produced) and is refused later for the wrong reason.
+        //
+        // The id need not exist: this gate runs before the dataset is looked up.
+        var req = new HttpRequestMessage(
+            HttpMethod.Get, "/reference-report?referenceDataId=00000000000000000000000000000000");
+        req.Headers.Add("Cookie", "JSESSIONID=test-placeholder-session-id");
+        req.Headers.Add("Accept", "*/*");
+        // No Accept-Language header, and no ?locale=.
+
+        var response = await _http!.SendAsync(req);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotAcceptable));
+    }
+
+    [Test]
+    public async Task ReferenceReport_StoredDataset_NoProducibleOutput_CarriesItsCode()
+    {
+        // The argument for 406-with-a-code over the bodiless refusal it replaced is
+        // precisely that a caller can now tell "no JSON for a stored dataset" from
+        // "no JSON at all" — so the status alone is the part that proves nothing.
+        var req = new HttpRequestMessage(
+            HttpMethod.Get, "/reference-report?referenceDataId=00000000000000000000000000000000");
+        req.Headers.Add("Cookie", "JSESSIONID=test-placeholder-session-id");
+        req.Headers.Add("Accept", "application/json");
+        req.Headers.Add("Accept-Language", "en");
+
+        var response = await _http!.SendAsync(req);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotAcceptable));
+            Assert.That(body, Does.Contain(ProblemCodes.NoAcceptableOutput));
+            Assert.That(body, Does.Contain("referenceDataId"),
+                "the detail must name what to drop, not merely refuse");
+        });
     }
 
     [Test]

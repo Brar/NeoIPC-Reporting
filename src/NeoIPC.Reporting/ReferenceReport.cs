@@ -50,7 +50,7 @@ class ReferenceReport
         [FromQuery] ushort? gestationalAgeFrom,
         [FromQuery] ushort? gestationalAgeTo,
         [FromQuery] string[] countryFilter,
-        [FromQuery] string[] hospitalFilter,
+        [FromQuery] string[] departmentFilter,
         [FromQuery] bool? testUnitFilter,
         [FromQuery] bool? defaultPatientFilter,
         [FromQuery] ushort? sparseDataThreshold,
@@ -92,6 +92,8 @@ class ReferenceReport
         if (accept.IsDefaultOrEmpty)
             return Results.StatusCode(406);
 
+        var hasStoredDataMode = !string.IsNullOrEmpty(referenceDataId);
+
         // A rendering locale is mandatory only for the rendered (html/pdf)
         // outputs. The application/json data output is the raw neoipcr dataset
         // (codes), which is locale-independent, so it must not be gated on a
@@ -99,10 +101,12 @@ class ReferenceReport
         // explicit ?locale=) let producer selection proceed — the JSON path
         // defaults its process locale (RScriptReportProducer.DefaultLocale).
         // Refuse up front only when no locale is available AND the request can
-        // be satisfied only by a rendered output.
+        // be satisfied only by a rendered output. In stored-dataset mode there
+        // is no JSON output to fall back on, so the rendered formats are the
+        // only ones that can serve the request.
         if (acceptLang.IsDefaultOrEmpty
             && string.IsNullOrWhiteSpace(locale)
-            && OutputNegotiation.OnlyRenderedOutputsAreAcceptable(accept))
+            && OutputNegotiation.OnlyRenderedOutputsAreAcceptable(accept, !hasStoredDataMode))
             return Results.StatusCode(406);
 
         // API-boundary YAML safety: every string-typed param flows into a
@@ -113,7 +117,7 @@ class ReferenceReport
             (nameof(referenceDataId), referenceDataId),
             (nameof(locale), locale))
             ?? InputValidation.RejectUnsafeStringArray(nameof(countryFilter), countryFilter)
-            ?? InputValidation.RejectUnsafeStringArray(nameof(hospitalFilter), hospitalFilter);
+            ?? InputValidation.RejectUnsafeStringArray(nameof(departmentFilter), departmentFilter);
         if (unsafeInput is not null) return unsafeInput;
 
         if (!ConfidenceIntervalConverter.TryParse(confidenceIntervals, out var confidenceIntervalMode))
@@ -122,15 +126,14 @@ class ReferenceReport
                 "Invalid confidenceIntervals",
                 "The 'confidenceIntervals' parameter must be one of: all, rate, none.");
 
-        var hasStoredDataMode = !string.IsNullOrEmpty(referenceDataId);
-
         if (hasStoredDataMode)
         {
             var rejected = CollectLiveFetchParams(
                 reportingPeriodFrom, reportingPeriodTo,
                 birthWeightFrom, birthWeightTo,
                 gestationalAgeFrom, gestationalAgeTo,
-                countryFilter);
+                countryFilter, departmentFilter,
+                testUnitFilter, defaultPatientFilter);
             if (rejected.Count > 0)
                 return ProblemDetailsHelper.BadRequest(
                     ProblemCodes.MixedModeNotAllowed,
@@ -178,7 +181,7 @@ class ReferenceReport
             GestationalAgeFrom = gestationalAgeFrom,
             GestationalAgeTo = gestationalAgeTo,
             CountryFilter = countryFilter.Length > 0 ? countryFilter : null,
-            HospitalFilter = hospitalFilter.Length > 0 ? hospitalFilter : null,
+            DepartmentFilter = departmentFilter.Length > 0 ? departmentFilter : null,
             TestUnitFilter = testUnitFilter,
             DefaultPatientFilter = defaultPatientFilter,
             SparseDataThreshold = sparseDataThreshold,
@@ -209,7 +212,21 @@ class ReferenceReport
             apiParameters, renderParameters, quartoLanguages,
             options, registry, environment, loggerFactory);
         if (problem is not null) return problem;
-        if (generator is null) return Results.StatusCode(415);
+        // Nothing the caller accepts can be produced: either no supported media
+        // type was offered, or a rendered one was but no supported language. That
+        // is proactive-negotiation failure (RFC 9110 §15.5.7), not a request-payload
+        // media-type problem — and it carries a code, because a caller otherwise
+        // cannot tell "this resource serves no JSON for a stored dataset" from
+        // "this resource serves no JSON at all".
+        if (generator is null)
+            return ProblemDetailsHelper.NotAcceptable(
+                ProblemCodes.NoAcceptableOutput,
+                hasStoredDataMode
+                    ? "No output matching this request's Accept and Accept-Language can be produced. "
+                      + "A stored reference dataset renders to text/html or application/pdf only; "
+                      + "the application/json dataset is available without 'referenceDataId'."
+                    : "No output matching this request's Accept and Accept-Language can be produced. "
+                      + "This report serves text/html, application/pdf and application/json.");
 
         await using (generator)
         {
@@ -219,11 +236,20 @@ class ReferenceReport
         }
     }
 
+    // Every parameter that only a live fetch can honour belongs here, and the test
+    // for membership is where the value is consumed: each of these reaches
+    // get_dataset_options, which a stored-dataset render never calls. Omitting one
+    // accepts the request and answers over the whole stored dataset — a 200
+    // describing a cohort the caller did not ask for — while a sibling parameter in
+    // the same request is refused. Silently ignoring one and rejecting the other is
+    // the worse half of that pair, so the list is kept complete rather than grown
+    // one defect at a time.
     static List<string> CollectLiveFetchParams(
         DateOnly? reportingPeriodFrom, DateOnly? reportingPeriodTo,
         ushort? birthWeightFrom, ushort? birthWeightTo,
         ushort? gestationalAgeFrom, ushort? gestationalAgeTo,
-        string[] countryFilter)
+        string[] countryFilter, string[] departmentFilter,
+        bool? testUnitFilter, bool? defaultPatientFilter)
     {
         var rejected = new List<string>();
         if (reportingPeriodFrom is not null) rejected.Add("reportingPeriodFrom");
@@ -233,6 +259,9 @@ class ReferenceReport
         if (gestationalAgeFrom is not null) rejected.Add("gestationalAgeFrom");
         if (gestationalAgeTo is not null) rejected.Add("gestationalAgeTo");
         if (countryFilter.Length > 0) rejected.Add("countryFilter");
+        if (departmentFilter.Length > 0) rejected.Add("departmentFilter");
+        if (testUnitFilter is not null) rejected.Add("testUnitFilter");
+        if (defaultPatientFilter is not null) rejected.Add("defaultPatientFilter");
         return rejected;
     }
 
@@ -281,6 +310,15 @@ class ReferenceReport
         var rScriptSupported = RScriptReferenceReportProducer.SupportedLanguageDictionary.Keys
             .ToHashSet(StringComparer.Ordinal);
 
+        // The data producer fetches from DHIS2; it has no way to read a stored
+        // dataset, because Generate-ReferenceData.R accepts no argument naming
+        // one. Selecting it for a request that named a stored dataset would
+        // answer a different question than the one asked — live data, narrowed
+        // by whatever filters the caller supplied — under a 200. Excluding it
+        // here leaves such a request with no acceptable producer, which the caller
+        // learns as a coded 406 rather than as a plausible wrong dataset.
+        var hasStoredDataMode = !string.IsNullOrEmpty(apiParameters.ReferenceDataId);
+
         // Format has priority over language; exact-match passes first, then subset.
         foreach (var acceptHeader in apiParameters.AcceptHeaders)
         {
@@ -294,7 +332,8 @@ class ReferenceReport
                 if (gen is not null) return (gen, null);
             }
 
-            if (RScriptReportProducer.SupportedMediaTypeHeaderValues.ContainsKey(mediaType))
+            if (!hasStoredDataMode &&
+                RScriptReportProducer.SupportedMediaTypeHeaderValues.ContainsKey(mediaType))
             {
                 var (gen, problem) = TryRScript(mediaType, apiParameters, renderParameters,
                     rScriptSupported, options, environment, loggerFactory);
@@ -316,7 +355,8 @@ class ReferenceReport
                 if (gen is not null) return (gen, null);
             }
 
-            if (RScriptReportProducer.SupportedMediaTypeHeaderValues.TryGetValue(mediaType,
+            if (!hasStoredDataMode &&
+                RScriptReportProducer.SupportedMediaTypeHeaderValues.TryGetValue(mediaType,
                     out var rScriptValue) &&
                 rScriptValue.IsSubsetOf(acceptHeader))
             {
