@@ -40,20 +40,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: CHANGELOG.md describes the built version
-        shell: bash
+      - id: version
+        name: Read the version from Directory.Build.props
+        # Read as XML, not with a regex over the text, as in the release workflow: a regex cannot
+        # tell a live element from one inside a comment, and concatenates the values of two elements
+        # into a version that exists nowhere. The parser sees exactly the elements MSBuild sees.
+        shell: pwsh
         run: |
-          ver="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props | tr -d '[:space:]')"
-          if [ -z "$ver" ]; then
-            echo "::error file=Directory.Build.props::No <Version> element found."
+          $nodes = ([xml](Get-Content -Raw Directory.Build.props)).SelectNodes('/Project/PropertyGroup/Version')
+          if ($nodes.Count -ne 1) {
+            Write-Output "::error file=Directory.Build.props::Expected exactly one <Version> element, found $($nodes.Count)."
             exit 1
-          fi
-          # Literal prefix match, as in the release workflow: a version carries `.` and `-`, which a
-          # regex built from it would interpret, and the closing `]` is what stops `0.2.0` matching a
-          # `0.2.0-rc.1` heading.
+          }
+          $file = $nodes[0].InnerText.Trim()
+          if (-not $file) {
+            Write-Output "::error file=Directory.Build.props::The <Version> element is empty."
+            exit 1
+          }
+          "version=$file" >> $env:GITHUB_OUTPUT
+          Write-Output "Directory.Build.props declares $file."
+      - name: CHANGELOG.md describes the built version
+        # Literal prefix match, as in the release workflow: a version carries `.` and `-`, which a
+        # regex built from it would interpret, and the closing `]` is what stops `0.2.0` matching a
+        # `0.2.0-rc.1` heading. A section ends at the next version heading or at a Keep a Changelog
+        # link-reference line (`[x.y.z]: url`), so the trailing reference definitions never leak into
+        # the last version's body.
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ver="$VERSION"
           section="$(awk -v want="## [$ver]" '
             index($0, want) == 1 { inside = 1; next }
             inside && index($0, "## [") == 1 { exit }
+            inside && $0 ~ /^\[[^]]+\]: / { exit }
             inside { print }
           ' CHANGELOG.md)"
           if [ -z "$(printf '%s' "$section" | tr -d '[:space:]')" ]; then
