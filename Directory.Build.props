@@ -1,0 +1,21 @@
+<Project>
+
+  <!--
+    The service's version, in one place for every project in the solution.
+
+    This is the version the published assembly reports. Without it MSBuild defaults to 1.0.0, so a
+    released image carried a binary describing itself as 1.0.0 whatever tag the image was published
+    under — the image labels stamp the versions of the sources baked into it, but nothing carried
+    the service's own.
+
+    The release tag remains the source of truth: a `v*` tag drives both the image tag and the
+    Release, and the release workflow verifies this value matches it, exactly as the sibling
+    repositories verify their VERSION file, DESCRIPTION and package.json. Bump this in the same
+    commit that adds the version's CHANGELOG.md section; CI checks both on every pull request, so a
+    version cannot be tagged before it is described.
+  -->
+  <PropertyGroup>
+    <Version>0.2.0</Version>
+  </PropertyGroup>
+
+</Project>
